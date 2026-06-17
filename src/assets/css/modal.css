@@ -1,0 +1,467 @@
+div.modal_popup {
+    position: absolute;
+    min-width: 38vh;
+    background: var(--color_light_black);
+    border-color: rgb(var(--color_r), var(--color_g), var(--color_b));
+    padding: 2vh;
+    padding-bottom: 0vh;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    cursor: default;
+
+    --aug-border: 0.2vh;
+    --aug-border-bg: rgb(var(--color_r), var(--color_g), var(--color_b));
+    --aug-inset: 5px;
+    --aug-inset-bg: var(--color_light_black);
+}
+
+div.modal_popup.error {
+    --aug-bl-height: 3vh;
+    --aug-bl-width: 30%;
+    border-top: 0.2vh solid var(--color_red);
+    border-bottom: 0.2vh solid transparent;
+    padding-bottom: 0.2vh;
+}
+div.modal_popup.warning {
+    --aug-b-width: 20%;
+    --aug-b-origin-x: 30%;
+    border-top: 0.2vh solid var(--color_yellow);
+    border-bottom: 0.2vh solid transparent;
+    padding-bottom: 0.2vh;
+}
+div.modal_popup.info {
+    --aug-border: 0.2vh;
+}
+
+div.modal_popup.focus {
+    z-index: 2500 !important;
+}
+
+div.modal_popup.blink {
+    border: none;
+    animation-name: blink;
+    animation-duration: .1s;
+    animation-iteration-count: infinite;
+    animation-timing-function: linear;
+}
+
+@keyframes blink {
+    0% {background: rgba(var(--color_r), var(--color_g), var(--color_b), 0.0);}
+    100% {background: rgba(var(--color_r), var(--color_g), var(--color_b), 1);}
+}
+
+div.modal_popup > h1 {
+    width: 100%;
+    cursor: move;
+    font-size: 4vh;
+    margin: 0vh;
+    margin-bottom: 2vh;
+}
+
+div.modal_popup > h1 i {
+    font-size: 2.3vh;
+    opacity: 0.6;
+    font-style: normal;
+}
+
+div.modal_popup > h5 {
+    font-size: 2vh;
+    font-weight: normal;
+    margin: 0vh;
+    margin-bottom: 2vh;
+}
+
+div.modal_popup > h5 > a {
+    color: inherit;
+}
+
+div.modal_popup > h5 > a:hover {
+    font-weight: bold;
+}
+
+div.modal_popup > div:last-child {
+    width: 100%;
+    display: flex;
+    align-items: stretch;
+    justify-content: flex-end;
+    position: relative;
+    top: 0.2vh;
+}
+
+div.modal_popup button {
+    background: transparent;
+    border: 0.19vh solid rgba(var(--color_r), var(--color_g), var(--color_b), 0.7);
+    border-radius: 0.278vh;
+    color: rgb(var(--color_r), var(--color_g), var(--color_b));
+    font-size: 1.85vh;
+    font-weight: bold;
+    padding: 0.5vh 0.9vh;
+    margin-left: 1.5vh;
+    border-bottom-left-radius: 0vh;
+    border-bottom-right-radius: 0vh;
+    padding-bottom: 0.7vh;
+    cursor: pointer;
+}
+
+div.modal_popup button:hover {
+    background: rgba(var(--color_r), var(--color_g), var(--color_b), 0.5);
+}
+
+div.modal_popup table, div.modal_popup table th, div.modal_popup table td {
+    border: 0.15vh solid rgb(var(--color_r), var(--color_g), var(--color_b));
+    border-collapse: collapse;
+}
+
+div.modal_popup table th, div.modal_popup table td {
+    padding: 0.3vh;
+}
+
+div.modal_popup table th {
+    font-size: 2vh;
+    background: rgba(var(--color_r), var(--color_g), var(--color_b), 0.6);
+    color: var(--color_light_black);
+}
+
+div.modal_popup table td {
+    font-size: 1.7vh;
+}
+
+div.modal_popup table#settingsEditor tbody {
+	display: block;
+	position: relative;
+	max-height: 60vh;
+	overflow: auto;
+}
+
+div.modal_popup table#settingsEditor tbody tr:first-child {
+	position: sticky;
+	top: 0px;
+}
+
+div.modal_popup table:not(#settingsEditor) td:first-child {
+    text-align: center;
+}
+
+div.modal_popup textarea {
+    background: var(--color_light_black);
+    color: rgb(var(--color_r), var(--color_g), var(--color_b));
+    border: 0.15vh solid rgb(var(--color_r), var(--color_g), var(--color_b));
+    padding: 0.4vh 0.2vh;
+    font-size: 1.4vh;
+    resize: none;
+}
+
+div.modal_popup textarea:active, div.modal_popup textarea:focus {
+    outline: none !important;
+}
+
+div.modal_popup td input {
+    width: 100%;
+    background: var(--color_light_black);
+    color: rgb(var(--color_r), var(--color_g), var(--color_b));
+    border: 0.15vh solid rgb(var(--color_r), var(--color_g), var(--color_b));
+    padding: 0.4vh 0.2vh;
+    font-size: 1.4vh;
+    box-sizing: border-box;
+}
+
+div.modal_popup td input::placeholder {
+    color: rgb(var(--color_r), var(--color_g), var(--color_b));
+    opacity: 0.7;
+}
+
+div.modal_popup td input:active, div.modal_popup td input:focus {
+    outline: none !important;
+    background: rgb(var(--color_r), var(--color_g), var(--color_b));
+    color: var(--color_light_black);
+}
+
+div.modal_popup td input:active::placeholder, div.modal_popup td input:focus::placeholder {
+    color: var(--color_light_black);
+}
+
+div.modal_popup td select {
+    cursor: pointer;
+    width: 100%;
+    background: var(--color_light_black);
+    color: rgb(var(--color_r), var(--color_g), var(--color_b));
+    border: 0.15vh solid rgb(var(--color_r), var(--color_g), var(--color_b));
+    padding: 0.4vh;
+    font-size: 1.4vh;
+}
+
+div.modal_popup summary {
+    font-size: 1.9vh;
+    font-weight: normal;
+    outline: none !important;
+    cursor: pointer;
+}
+
+div.modal_popup summary+table {
+    margin-top: 1.5vh;
+}
+
+/* Settings editor modal */
+
+h6#settingsEditorStatus {
+    margin: 0;
+    margin-top: 1vh;
+    font-size: 1.5vh;
+    font-style: italic;
+}
+
+div.modal_popup:has(#settingsEditorShell) {
+    width: 78vw;
+    max-width: 78vw;
+    max-height: 84vh;
+    justify-content: flex-start;
+}
+
+div#settingsEditorShell {
+    width: 100%;
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    gap: 1vh;
+    min-height: 0;
+}
+
+.settings_editor_quickbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) repeat(6, max-content);
+    gap: 0.8vw;
+    align-items: center;
+    padding: 0.8vh;
+    border: 0.14vh solid rgba(var(--color_r), var(--color_g), var(--color_b), 0.45);
+    background: rgba(var(--color_r), var(--color_g), var(--color_b), 0.05);
+}
+
+.settings_editor_quickbar strong,
+.settings_editor_quickbar span {
+    display: block;
+    min-width: 0;
+}
+
+.settings_editor_quickbar strong {
+    font-size: 1.6vh;
+}
+
+.settings_editor_quickbar span {
+    margin-top: 0.25vh;
+    font-size: 1.15vh;
+    opacity: 0.72;
+}
+
+.settings_editor_quickbar button,
+.settings_editor_tabs button {
+    margin-left: 0;
+    border-radius: 0.25vh;
+}
+
+.settings_editor_tabs {
+    display: grid;
+    grid-template-columns: repeat(10, minmax(0, 1fr));
+    gap: 0.35vw;
+}
+
+.settings_editor_tabs button {
+    min-width: 0;
+    height: 3vh;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    border-bottom-left-radius: 0.25vh;
+    border-bottom-right-radius: 0.25vh;
+    font-size: 1.25vh;
+}
+
+.settings_editor_tabs button.active {
+    background: rgba(var(--color_r), var(--color_g), var(--color_b), 0.32);
+}
+
+.settings_editor_body {
+    min-height: 0;
+    max-height: 52vh;
+    overflow: auto;
+}
+
+div.modal_popup table#settingsEditor {
+    width: 100%;
+}
+
+div.modal_popup table#settingsEditor tr.settings_section_hidden,
+div.modal_popup table#settingsEditor tr.settings_header_row {
+    display: none;
+}
+
+div.modal_popup table#settingsEditor td:first-child {
+    width: 18%;
+    font-family: var(--font_mono);
+    font-size: 1.25vh;
+}
+
+div.modal_popup table#settingsEditor td:nth-child(2) {
+    width: 44%;
+    font-size: 1.25vh;
+    opacity: 0.86;
+}
+
+div.modal_popup table#settingsEditor td:nth-child(3) {
+    width: 38%;
+}
+
+div.modal_popup table#settingsEditor input,
+div.modal_popup table#settingsEditor select {
+    width: 100%;
+    min-height: 2.8vh;
+    box-sizing: border-box;
+    background: rgba(0, 0, 0, 0.46);
+    color: rgb(var(--color_r), var(--color_g), var(--color_b));
+    border: 0.12vh solid rgba(var(--color_r), var(--color_g), var(--color_b), 0.58);
+    font-family: var(--font_mono);
+}
+
+.widget_visibility_panel {
+    width: 68vw;
+    max-width: 68vw;
+    max-height: 58vh;
+    overflow: auto;
+}
+
+.widget_visibility_intro {
+    margin-bottom: 1vh;
+}
+
+.widget_visibility_master,
+.widget_visibility_row {
+    display: grid;
+    grid-template-columns: 2.2vh minmax(0, 1fr);
+    gap: 0.65vw;
+    align-items: center;
+    padding: 0.55vh;
+    border: 0.12vh solid rgba(var(--color_r), var(--color_g), var(--color_b), 0.32);
+    background: rgba(var(--color_r), var(--color_g), var(--color_b), 0.045);
+}
+
+.widget_visibility_row.select_row {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.widget_visibility_row.select_row select {
+    width: 100%;
+    min-height: 2.5vh;
+    background: rgba(0, 0, 0, 0.46);
+    color: rgb(var(--color_r), var(--color_g), var(--color_b));
+    border: 0.12vh solid rgba(var(--color_r), var(--color_g), var(--color_b), 0.58);
+    font-family: var(--font_mono);
+}
+
+.widget_visibility_master {
+    border-color: rgba(var(--color_r), var(--color_g), var(--color_b), 0.64);
+}
+
+.widget_visibility_grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.8vw;
+}
+
+.widget_visibility_grid section {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.45vh;
+    align-content: start;
+}
+
+.widget_visibility_grid h4 {
+    margin: 0 0 0.35vh;
+    font-size: 1.35vh;
+}
+
+.widget_visibility_panel input[type="checkbox"] {
+    width: 1.6vh;
+    height: 1.6vh;
+    margin: 0;
+}
+
+.widget_visibility_panel strong,
+.widget_visibility_panel em {
+    display: block;
+    min-width: 0;
+}
+
+.widget_visibility_panel strong {
+    font-size: 1.18vh;
+}
+
+.widget_visibility_panel em {
+    margin-top: 0.2vh;
+    font-size: 1vh;
+    font-style: normal;
+    line-height: 1.25;
+    opacity: 0.68;
+}
+
+h6#widgetVisibilityStatus {
+    margin: 1vh 0 0;
+    font-size: 1.2vh;
+    font-style: italic;
+}
+
+@media (max-width: 1100px), (max-height: 620px) {
+    .settings_editor_tabs {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+
+    .settings_editor_quickbar {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .widget_visibility_panel {
+        width: 86vw;
+        max-width: 86vw;
+    }
+
+    .widget_visibility_grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+/* Keyboard shortcuts modal */
+
+table.shortcutsHelp td:nth-child(2) input {
+    border: none;
+}
+
+table.shortcutsHelp td:first-child {
+    word-spacing: .3vh;
+    font-weight: bold;
+    padding: .8vh;
+}
+
+table.shortcutsHelp td:nth-child(3) {
+    max-width: 40vw;
+}
+
+details#shortcutsHelpAccordeon2 table td:nth-child(3) {
+    display: flex;
+    align-items: center;
+}
+
+details#shortcutsHelpAccordeon2 table td:nth-child(3) input:first-child {
+    font-family: var(--font_mono);
+    min-width: 30vw;
+}
+
+details#shortcutsHelpAccordeon2 table td:nth-child(3) input[type="checkbox"] {
+    width: auto;
+}
+
+/* fsDisp media displayer */
+
+.fsDisp_mediaDisp {
+    max-width: 50vw;
+    max-height: 50vh;
+    outline: none !important;
+}

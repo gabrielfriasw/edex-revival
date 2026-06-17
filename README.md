@@ -1,0 +1,151 @@
+# eDEX Revival
+
+<p align="center">
+  <img alt="eDEX Revival wordmark" src="media/revival/brand-splash.png" width="720">
+</p>
+
+<p align="center">
+  <a href="https://github.com/gabrielfriasw/edex-revival/releases"><img alt="Release" src="https://img.shields.io/github/v/release/gabrielfriasw/edex-revival?style=for-the-badge"></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-GPL--3.0-blue?style=for-the-badge"></a>
+  <img alt="Windows" src="https://img.shields.io/badge/windows-primary-00d4ff?style=for-the-badge">
+  <img alt="Linux" src="https://img.shields.io/badge/linux-supported-39ff88?style=for-the-badge">
+  <img alt="Version" src="https://img.shields.io/badge/revival-1.0.0-9cf?style=for-the-badge">
+</p>
+
+eDEX Revival is a revived sci-fi terminal, system monitor, file cockpit, lightweight editor, SSH launcher, and local developer cockpit.
+
+It is a fork and continuation of the original [eDEX-UI](https://github.com/GitSquared/edex-ui), created by Gabriel "Squared" Saillard. Revival development is maintained by Gabriel Frias.
+
+<p align="center">
+  <img alt="eDEX Revival main interface" src="media/revival/hero-main.png">
+</p>
+
+## What Changed
+
+- Modernized Electron runtime and packaging for current Windows and Linux builds.
+- Revival layout presets: Classic, Minimal, Developer, Privacy, and Cinematic.
+- Auto-hide top launcher for Settings, Widgets, Explorer, Diagnostics, Editor, SSH, Network Lens, Theme Tools, and Layout Tools.
+- File Operations Cockpit with explorer, preview, Git-aware actions, batch operations, and terminal-here flow.
+- Lightweight editor workbench with tabs, file sidebar, search, split view, save states, and safer file-open behavior.
+- Native SSH profile client that opens sessions in terminal tabs without storing passwords.
+- Terminal diagnostics and optional Error to Fix handoff for Codex or Claude CLI.
+- Privacy controls for IP, interface name, geolocation, and globe/network modes.
+- Plugin docs, examples, and plugin error recovery.
+
+## Screenshots
+
+### File Operations Cockpit
+
+![File Operations Cockpit](media/revival/file-cockpit.png)
+
+### Editor Workbench
+
+![Editor Workbench](media/revival/editor-workbench.png)
+
+### Settings Center
+
+![Settings Center](media/revival/settings-center.png)
+
+### SSH Client
+
+![SSH Client](media/revival/ssh-client.png)
+
+### Theme Variants
+
+![Amber Revival theme](media/revival/amber-theme.png)
+
+## Install
+
+Download builds from the [Releases](https://github.com/gabrielfriasw/edex-revival/releases) page.
+
+Current release artifact names:
+
+```text
+eDEX-Revival-Windows-x64.exe
+eDEX-Revival-Linux-x86_64.AppImage
+```
+
+Release binaries may be unsigned. Windows can show a SmartScreen warning until the app builds trust.
+
+## Development
+
+Use Node 24.x for clean installs and packaging.
+
+Windows:
+
+```powershell
+npm run install-windows
+npm start
+```
+
+Linux:
+
+```bash
+npm run install-linux
+npm start
+```
+
+Windows and Linux are the supported packaging targets for this release.
+
+## Packaging
+
+Windows:
+
+```powershell
+npm run build-windows
+```
+
+Linux:
+
+```bash
+npm run build-linux
+```
+
+Build artifacts are written to `dist/`.
+
+## Privacy And AI
+
+AI features are disabled by default. When enabled, eDEX Revival can prepare local CLI prompts for Codex or Claude using terminal diagnostics or selected project context.
+
+Privacy controls can hide IP address, network interface name, geolocation, and live globe/network lookup behavior. The Privacy preset applies those defaults in one step.
+
+## SSH
+
+The SSH Client stores profile metadata only:
+
+- profile name
+- host
+- user
+- port
+- identity file path
+- remote cwd
+- extra ssh args
+
+Passwords are not stored. Authentication stays with your native `ssh` client, keys, ssh-agent, and terminal prompts.
+
+## Documentation
+
+- [Revival roadmap](docs/edex-revival-roadmap.md)
+- [Release notes](docs/revival-release-notes.md)
+- [Contribution guide](docs/CONTRIBUTING-REVIVAL.md)
+- [Plugin manifest docs](docs/plugins/manifest.md)
+- [Revival changelog](CHANGELOG-REVIVAL.md)
+
+## Credits
+
+Original eDEX-UI:
+
+- Gabriel "Squared" Saillard: original application, design direction, and source code.
+- Seena's DEX-UI work inspired the original project.
+- Rob "Arscan" Scanlon's ENCOM Globe powers the globe widget.
+- IceWolf composed the original sound effects used by eDEX-UI.
+
+Revival:
+
+- Gabriel Frias: Revival ownership, packaging, UX refresh, developer cockpit, SSH flow, privacy controls, docs, and release maintenance.
+
+See [NOTICE.md](NOTICE.md) for attribution details.
+
+## License
+
+eDEX Revival is distributed under GPL-3.0, the same license as the original eDEX-UI project. Keep `LICENSE` and attribution notices intact when redistributing modified versions.

@@ -1,0 +1,10 @@
+{
+    "id": "revival.markdown-panel",
+    "name": "Markdown Panel Example",
+    "version": "0.1.0",
+    "entry": "index.js",
+    "permissions": ["window", "panels"],
+    "contributes": {
+        "panels": ["markdown.preview"]
+    }
+}

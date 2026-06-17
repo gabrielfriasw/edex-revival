@@ -1,0 +1,71 @@
+name: Build packaged binaries
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            src/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install runtime dependencies
+        run: npm ci --prefix src
+
+      - name: Build Windows installer
+        run: npm run build-windows
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Windows-Installer
+          path: dist/*.exe
+          if-no-files-found: error
+
+  build-linux:
+    runs-on: ubuntu-latest
+    needs: build-windows
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            src/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install runtime dependencies
+        run: npm ci --prefix src
+
+      - name: Build Linux AppImage
+        run: npm run build-linux
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Linux-AppImage
+          path: dist/*.AppImage
+          if-no-files-found: error

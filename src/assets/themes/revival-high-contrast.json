@@ -1,0 +1,45 @@
+{
+    "colors": {
+        "r": 238,
+        "g": 250,
+        "b": 255,
+        "black": "#000000",
+        "light_black": "#000000",
+        "grey": "#111111",
+        "red": "#ff4d6d",
+        "yellow": "#ffe66d",
+        "green": "#8cffb0",
+        "blue": "#74c0fc",
+        "magenta": "#e0aaff",
+        "cyan": "#9bf6ff",
+        "white": "#ffffff",
+        "brightBlack": "#808080",
+        "brightRed": "#ff8fa3",
+        "brightGreen": "#b7ffc9",
+        "brightYellow": "#fff3a3",
+        "brightBlue": "#a5d8ff",
+        "brightMagenta": "#edc7ff",
+        "brightCyan": "#c8fbff",
+        "brightWhite": "#ffffff"
+    },
+    "cssvars": {
+        "font_main": "United Sans Medium",
+        "font_main_light": "United Sans Light"
+    },
+    "terminal": {
+        "fontFamily": "Fira Mono",
+        "cursorStyle": "block",
+        "foreground": "#ffffff",
+        "background": "#000000",
+        "cursor": "#ffffff",
+        "cursorAccent": "#000000",
+        "selection": "rgba(255,255,255,0.35)"
+    },
+    "globe": {
+        "base": "#000000",
+        "marker": "#ffffff",
+        "pin": "#ffe66d",
+        "satellite": "#ffffff"
+    },
+    "injectCSS": "button,input,select{letter-spacing:0;} body{background-color:#000;} .dev_window,.modal_popup,section#main_shell,section.mod_column,section#filesystem{box-shadow:none!important;}"
+}

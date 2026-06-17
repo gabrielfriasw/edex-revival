@@ -1,0 +1,505 @@
+html, body {
+    width: 100%;
+    height: 100%;
+    margin: 0vh;
+    padding: 0vh;
+    overflow: hidden;
+}
+body {
+    user-select: none !important;
+    padding-top: 1.85vh;
+    color: rgb(var(--color_r), var(--color_g), var(--color_b));
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    background: linear-gradient(90deg, var(--color_light_black) 1.85vh, transparent 1%) center, linear-gradient(var(--color_light_black) 1.85vh, transparent 1%) center, var(--color_grey);
+    background-size: 2.04vh 2.04vh;
+}
+body.solidBackground {
+    background: var(--color_light_black);
+}
+
+::-webkit-scrollbar {
+    width: 8px;
+}
+::-webkit-scrollbar-button {
+    display: none;
+}
+::-webkit-scrollbar-track {
+    background: rgba(var(--color_r), var(--color_g), var(--color_b), 0.4);
+    border: 3px solid var(--color_light_black);
+}
+::-webkit-scrollbar-thumb {
+    background: rgb(var(--color_r), var(--color_g), var(--color_b));
+    height: auto;
+}
+
+section > h3.title:first-child {
+    position: fixed;
+    margin: 0vh;
+    padding: 0vh 0.925vh;
+    font-size: 1.02vh;
+    border-bottom: 0.092vh solid rgba(var(--color_r), var(--color_g), var(--color_b), 0.3);
+}
+section > h3.title:first-child > p {
+    display: inline-block;
+    margin: 0vh;
+    width: 49.4%;
+}
+section > h3.title:first-child > p:last-child {
+    text-align: right;
+    white-space: nowrap;
+}
+section > h3.title:first-child::before {
+    content: "";
+    border-left: 0.092vh solid rgba(var(--color_r), var(--color_g), var(--color_b), 0.3);
+    position: relative;
+    left: -0.925vh;
+    bottom: -0.555vh;
+    height: 0.46vh;
+}
+section > h3.title:first-child::after {
+    content: "";
+    border-right: 0.092vh solid rgba(var(--color_r), var(--color_g), var(--color_b), 0.3);
+    position: relative;
+    right: -1.2vh;
+    bottom: -0.555vh;
+    height: 0.46vh;
+}
+
+button#edex_settings_launcher,
+button#edex_widgets_toggle {
+    position: fixed;
+    top: auto;
+    bottom: 1.2vh;
+    z-index: 120;
+    min-width: 6.4vw;
+    height: 2.45vh;
+    padding: 0 0.7vw;
+    border: 0.14vh solid rgba(var(--color_r), var(--color_g), var(--color_b), 0.7);
+    border-radius: 0.25vh;
+    background: rgba(0, 0, 0, 0.72);
+    color: rgb(var(--color_r), var(--color_g), var(--color_b));
+    font-family: var(--font_main);
+    font-size: 1vh;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+button#edex_settings_launcher {
+    right: 1.2vw;
+}
+
+button#edex_widgets_toggle {
+    right: 8.15vw;
+    min-width: 7.8vw;
+}
+
+button#edex_settings_launcher:hover,
+button#edex_widgets_toggle:hover,
+button#edex_widgets_toggle.active {
+    background: rgba(var(--color_r), var(--color_g), var(--color_b), 0.18);
+    border-color: rgb(var(--color_r), var(--color_g), var(--color_b));
+}
+
+body.widgets-hidden section.mod_column,
+body.widgets-hidden section#keyboard {
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
+.widget-hidden {
+    display: none !important;
+}
+
+body.widgets-keyboard-hidden section#keyboard {
+    display: none !important;
+}
+
+body.widgets-keyboard-hidden:not(.widgets-side-hidden) section#main_shell {
+    height: 68vh;
+    margin-bottom: 0 !important;
+}
+
+body.widgets-side-hidden:not(.widgets-keyboard-hidden) section#main_shell {
+    width: 86vw;
+}
+
+body.widgets-side-hidden:not(.widgets-keyboard-hidden) section#main_shell > h3.title {
+    left: 7vw;
+    width: 86vw;
+}
+
+body.widgets-keyboard-hidden:not(.widgets-side-hidden) section#filesystem.dev-explorer:not(.window-mode):not(.cockpit-expanded),
+body.widgets-side-hidden:not(.widgets-keyboard-hidden) section#filesystem.dev-explorer:not(.window-mode):not(.cockpit-expanded) {
+    position: relative;
+    left: auto;
+    top: -0.925vh;
+    bottom: auto;
+}
+
+body.widgets-keyboard-hidden.widgets-side-hidden section#main_shell {
+    position: fixed;
+    left: 3vw;
+    top: 3.2vh;
+    width: 94vw;
+    height: 62vh;
+    margin: 0 !important;
+}
+
+body.widgets-keyboard-hidden.widgets-side-hidden section#main_shell > h3.title {
+    left: 3vw;
+    top: 1.2vh;
+    width: 94vw;
+}
+
+body.widgets-keyboard-hidden.widgets-side-hidden section#filesystem.dev-explorer:not(.window-mode):not(.cockpit-expanded) {
+    position: fixed;
+    left: 3vw;
+    top: auto;
+    bottom: 1.2vh;
+}
+
+#edex_launcher_rail {
+    position: fixed;
+    left: 0.8vw;
+    top: 9vh;
+    width: 3.2vw;
+    max-width: 4.8vh;
+    min-width: 3.2vh;
+    display: grid;
+    grid-auto-rows: minmax(3.8vh, 4.2vh);
+    gap: 0.55vh;
+    padding: 0.65vh 0.35vw;
+    z-index: 250;
+    box-sizing: border-box;
+    border: 0.14vh solid rgba(var(--color_r), var(--color_g), var(--color_b), 0.55);
+    background: rgba(0, 0, 0, 0.82);
+    box-shadow: 0 0 2vh rgba(0, 0, 0, 0.75);
+}
+
+body.launcher-rail-right #edex_launcher_rail {
+    left: auto;
+    right: 0.8vw;
+}
+
+#edex_launcher_rail button {
+    width: 100%;
+    min-width: 0;
+    height: 3.6vh;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    place-items: center;
+    padding: 0;
+    border: 0.12vh solid rgba(var(--color_r), var(--color_g), var(--color_b), 0.55);
+    background: rgba(var(--color_r), var(--color_g), var(--color_b), 0.06);
+    color: rgb(var(--color_r), var(--color_g), var(--color_b));
+    cursor: pointer;
+}
+
+#edex_launcher_rail button:hover,
+#edex_launcher_rail button:focus {
+    outline: none;
+    border-color: rgb(var(--color_r), var(--color_g), var(--color_b));
+    background: rgba(var(--color_r), var(--color_g), var(--color_b), 0.18);
+}
+
+#edex_launcher_rail .edex_ui_icon {
+    width: 2.15vh;
+    height: 2.15vh;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+#edex_launcher_rail span {
+    display: none;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.92vh;
+}
+
+body.launcher-rail-labels #edex_launcher_rail {
+    width: 9.5vw;
+    max-width: 18vh;
+}
+
+body.launcher-rail-labels #edex_launcher_rail button {
+    grid-template-columns: 2.4vh minmax(0, 1fr);
+    gap: 0.35vw;
+    justify-items: start;
+    padding: 0 0.45vw;
+}
+
+body.launcher-rail-labels #edex_launcher_rail span {
+    display: block;
+}
+
+body.launcher-rail-compact #edex_launcher_rail {
+    grid-auto-rows: 3.2vh;
+    width: 2.75vw;
+    min-width: 3vh;
+    top: 12vh;
+}
+
+body.launcher-rail-compact #edex_launcher_rail button {
+    height: 3vh;
+}
+
+body.launcher-rail-autohide #edex_launcher_rail {
+    transform: translateX(calc(-100% + 0.9vw));
+    transition: transform 160ms ease-out;
+}
+
+body.launcher-rail-right.launcher-rail-autohide #edex_launcher_rail {
+    transform: translateX(calc(100% - 0.9vw));
+}
+
+body.launcher-rail-autohide #edex_launcher_rail:hover,
+body.launcher-rail-autohide #edex_launcher_rail:focus-within {
+    transform: translateX(0);
+}
+
+body.launcher-rail-enabled button#edex_settings_launcher,
+body.launcher-rail-enabled button#edex_widgets_toggle {
+    display: none;
+}
+
+#edex_launcher_header {
+    position: fixed;
+    left: 50%;
+    top: 0;
+    width: min(78vw, 112vh);
+    min-height: 4.4vh;
+    display: grid;
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+    gap: 0.35vw;
+    align-items: center;
+    padding: 0.55vh 0.7vw 0.75vh;
+    z-index: 260;
+    box-sizing: border-box;
+    border: 0.14vh solid rgba(var(--color_r), var(--color_g), var(--color_b), 0.62);
+    border-top: 0;
+    background: rgba(0, 0, 0, 0.9);
+    box-shadow: 0 0.9vh 2.4vh rgba(0, 0, 0, 0.72);
+    transform: translate(-50%, calc(-100% + 0.85vh));
+    transition: transform 170ms ease-out;
+}
+
+#edex_launcher_header::after {
+    content: "";
+    position: absolute;
+    left: 42%;
+    right: 42%;
+    bottom: -0.1vh;
+    height: 0.36vh;
+    background: rgb(var(--color_r), var(--color_g), var(--color_b));
+    box-shadow: 0 0 1.1vh rgba(var(--color_r), var(--color_g), var(--color_b), 0.8);
+}
+
+#edex_launcher_header:hover,
+#edex_launcher_header:focus-within {
+    transform: translate(-50%, 0);
+}
+
+#edex_launcher_header button {
+    min-width: 0;
+    height: 3.15vh;
+    display: grid;
+    grid-template-columns: 2.2vh minmax(0, 1fr);
+    gap: 0.35vw;
+    align-items: center;
+    justify-items: start;
+    padding: 0 0.45vw;
+    border: 0.12vh solid rgba(var(--color_r), var(--color_g), var(--color_b), 0.52);
+    background: rgba(var(--color_r), var(--color_g), var(--color_b), 0.06);
+    color: rgb(var(--color_r), var(--color_g), var(--color_b));
+    font-family: var(--font_main);
+    font-size: 1vh;
+    cursor: pointer;
+}
+
+#edex_launcher_header button:hover,
+#edex_launcher_header button:focus {
+    outline: none;
+    border-color: rgb(var(--color_r), var(--color_g), var(--color_b));
+    background: rgba(var(--color_r), var(--color_g), var(--color_b), 0.18);
+}
+
+#edex_launcher_header .edex_ui_icon {
+    width: 1.85vh;
+    height: 1.85vh;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+#edex_launcher_header span {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+body.launcher-rail-compact #edex_launcher_header,
+body:not(.launcher-rail-labels) #edex_launcher_header {
+    width: auto;
+    grid-template-columns: repeat(8, 3.3vh);
+}
+
+body.launcher-rail-compact #edex_launcher_header button,
+body:not(.launcher-rail-labels) #edex_launcher_header button {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+    padding: 0;
+}
+
+body.launcher-rail-compact #edex_launcher_header span,
+body:not(.launcher-rail-labels) #edex_launcher_header span {
+    display: none;
+}
+
+body[data-layout-preset="minimal"] section#main_shell {
+    width: 84vw;
+    height: 74vh;
+    margin-bottom: 0 !important;
+}
+
+body[data-layout-preset="minimal"] section#main_shell > h3.title {
+    left: 8vw;
+    width: 84vw;
+}
+
+body[data-layout-preset="developer"] section#main_shell {
+    width: 66vw;
+    height: 66vh;
+}
+
+body[data-layout-preset="privacy"] #mod_netstat h2,
+body[data-layout-preset="privacy"] #mod_netstat_iname,
+body[data-layout-preset="privacy"] .mod_globe_headerInfo {
+    letter-spacing: 0;
+}
+
+body[data-layout-preset="cinematic"] section#main_shell,
+body[data-layout-preset="cinematic"] section.mod_column,
+body[data-layout-preset="cinematic"] section#filesystem {
+    box-shadow: 0 0 2.4vh rgba(var(--color_r), var(--color_g), var(--color_b), 0.12), inset 0 0 1.4vh rgba(var(--color_r), var(--color_g), var(--color_b), 0.06);
+}
+
+@media (max-width: 1400px), (max-height: 800px) {
+    #edex_launcher_rail {
+        top: 7vh;
+        grid-auto-rows: 3.3vh;
+        width: 3vh;
+        padding: 0.5vh 0.25vw;
+    }
+
+    #edex_launcher_rail button {
+        height: 3.05vh;
+    }
+
+    #edex_launcher_rail .edex_ui_icon {
+        width: 1.9vh;
+        height: 1.9vh;
+    }
+
+    body.launcher-rail-labels #edex_launcher_rail {
+        width: 12vw;
+    }
+
+    #edex_launcher_header {
+        width: 88vw;
+        grid-template-columns: repeat(8, minmax(0, 1fr));
+        gap: 0.25vw;
+    }
+
+    #edex_launcher_header button {
+        height: 3vh;
+        font-size: 0.9vh;
+        padding: 0 0.3vw;
+    }
+
+    button#edex_settings_launcher,
+    button#edex_widgets_toggle {
+        min-width: 7.5vw;
+        font-size: 0.9vh;
+    }
+}
+
+@media (max-width: 980px), (max-height: 560px) {
+    body {
+        padding-top: 0.8vh;
+    }
+
+    #edex_launcher_rail {
+        top: 1vh;
+        left: 1vw;
+        right: auto;
+        width: auto;
+        max-width: none;
+        grid-template-columns: repeat(8, 3.4vh);
+        grid-auto-flow: column;
+        grid-auto-rows: 3.4vh;
+        padding: 0.35vh;
+    }
+
+    body.launcher-rail-right #edex_launcher_rail {
+        left: 1vw;
+        right: auto;
+    }
+
+    body.launcher-rail-autohide #edex_launcher_rail,
+    body.launcher-rail-right.launcher-rail-autohide #edex_launcher_rail {
+        transform: translateY(calc(-100% + 0.8vh));
+    }
+
+    body.launcher-rail-autohide #edex_launcher_rail:hover,
+    body.launcher-rail-autohide #edex_launcher_rail:focus-within {
+        transform: translateY(0);
+    }
+
+    #edex_launcher_header {
+        left: 1vw;
+        width: 98vw;
+        grid-template-columns: repeat(8, minmax(3.2vh, 1fr));
+        gap: 0.2vw;
+        padding: 0.4vh 0.4vw 0.65vh;
+        transform: translate(0, calc(-100% + 0.8vh));
+    }
+
+    #edex_launcher_header:hover,
+    #edex_launcher_header:focus-within {
+        transform: translate(0, 0);
+    }
+
+    #edex_launcher_header button {
+        grid-template-columns: minmax(0, 1fr);
+        justify-items: center;
+        padding: 0;
+    }
+
+    #edex_launcher_header span {
+        display: none;
+    }
+
+    section#main_shell {
+        width: 88vw;
+        height: 55vh;
+    }
+
+    section#main_shell > h3.title {
+        left: 6vw;
+        width: 88vw;
+    }
+}

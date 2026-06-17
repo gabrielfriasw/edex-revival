@@ -1,0 +1,10 @@
+{
+    "id": "revival.status-widget",
+    "name": "Status Widget Example",
+    "version": "0.1.0",
+    "entry": "index.js",
+    "permissions": ["status", "window"],
+    "contributes": {
+        "statusWidgets": ["status.clock"]
+    }
+}

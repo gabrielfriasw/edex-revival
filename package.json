@@ -1,0 +1,99 @@
+{
+  "name": "edex-revival",
+  "productName": "eDEX Revival",
+  "version": "1.0.0",
+  "description": "A revived sci-fi terminal, system monitor, and developer cockpit.",
+  "keywords": [
+    "desktop",
+    "sci-fi",
+    "gui",
+    "portable",
+    "tty",
+    "terminal"
+  ],
+  "main": "src/_boot.js",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "packageManager": "npm@11.17.0",
+  "scripts": {
+    "start": "electron src",
+    "install-linux": "npm ci && npm ci --prefix src && npm run rebuild-native",
+    "install-windows": "npm ci && npm ci --prefix src && npm run rebuild-native",
+    "rebuild-native": "electron-rebuild -f -w node-pty -m src",
+    "prebuild-linux": "node scripts/prebuild.js && npm ci --prefix prebuild-src --omit=dev",
+    "prebuild-windows": "node scripts/prebuild.js && npm ci --prefix prebuild-src --omit=dev",
+    "build-linux": "electron-builder build -l --x64",
+    "build-windows": "electron-builder build -w",
+    "postbuild-linux": "node scripts/clean-prebuild.js",
+    "postbuild-windows": "node scripts/clean-prebuild.js",
+    "test": "npm audit --package-lock-only && npm audit --package-lock-only --prefix src",
+    "init-file-icons": "git submodule update --init",
+    "update-file-icons": "git submodule foreach git pull origin master && node file-icons-generator.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gabrielfriasw/edex-revival.git"
+  },
+  "author": "Gabriel Frias",
+  "license": "GPL-3.0",
+  "bugs": {
+    "url": "https://github.com/gabrielfriasw/edex-revival/issues"
+  },
+  "homepage": "https://github.com/gabrielfriasw/edex-revival#readme",
+  "build": {
+    "appId": "com.frias.edexrevival",
+    "productName": "eDEX Revival",
+    "publish": "github",
+    "asar": true,
+    "compression": "normal",
+    "copyright": "Original eDEX-UI Copyright (c) 2017-2021 Gabriel 'Squared' SAILLARD. Revival modifications Copyright (c) 2026 Gabriel Frias.",
+    "directories": {
+      "output": "dist",
+      "app": "prebuild-src"
+    },
+    "forceCodeSigning": false,
+    "npmRebuild": true,
+    "artifactName": "eDEX-Revival-${os}-${arch}.${ext}",
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "System",
+      "icon": "media/linuxIcons"
+    },
+    "appImage": {
+      "artifactName": "eDEX-Revival-Linux-${arch}.AppImage"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "media/icon.ico"
+    },
+    "nsis": {
+      "artifactName": "eDEX-Revival-Windows-${arch}.exe",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": true
+    }
+  },
+  "dependencies": {
+    "@electron/rebuild": "4.0.4",
+    "clean-css": "5.3.3",
+    "electron": "42.4.1",
+    "electron-builder": "26.15.3",
+    "mime-types": "3.0.2",
+    "node-abi": "4.31.0",
+    "node-json-minify": "3.0.0",
+    "terser": "5.48.0"
+  },
+  "optionalDependencies": {
+    "cson-parser": "4.0.9"
+  }
+}

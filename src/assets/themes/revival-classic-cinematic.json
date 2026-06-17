@@ -1,0 +1,45 @@
+{
+    "colors": {
+        "r": 126,
+        "g": 228,
+        "b": 232,
+        "black": "#000000",
+        "light_black": "#04070c",
+        "grey": "#141a22",
+        "red": "#ff5c75",
+        "yellow": "#ffd166",
+        "green": "#7dffb2",
+        "blue": "#6db8ff",
+        "magenta": "#d6a0ff",
+        "cyan": "#7ee4e8",
+        "white": "#e8feff",
+        "brightBlack": "#5f7480",
+        "brightRed": "#ff8798",
+        "brightGreen": "#a7ffc9",
+        "brightYellow": "#ffe29a",
+        "brightBlue": "#9ed0ff",
+        "brightMagenta": "#e6c2ff",
+        "brightCyan": "#a7f5f7",
+        "brightWhite": "#ffffff"
+    },
+    "cssvars": {
+        "font_main": "United Sans Medium",
+        "font_main_light": "United Sans Light"
+    },
+    "terminal": {
+        "fontFamily": "Fira Mono",
+        "cursorStyle": "block",
+        "foreground": "#d9fcff",
+        "background": "#04070c",
+        "cursor": "#7ee4e8",
+        "cursorAccent": "#04070c",
+        "selection": "rgba(126,228,232,0.34)"
+    },
+    "globe": {
+        "base": "#050b12",
+        "marker": "#7ee4e8",
+        "pin": "#ffd166",
+        "satellite": "#e8feff"
+    },
+    "injectCSS": "body[data-layout-preset=\"cinematic\"]{background-color:#04070c;background-image:linear-gradient(90deg,rgba(126,228,232,.08) 1px,transparent 1px),linear-gradient(rgba(126,228,232,.06) 1px,transparent 1px);background-size:2.04vh 2.04vh;} button,input,select{letter-spacing:0;}"
+}

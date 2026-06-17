@@ -1,0 +1,45 @@
+{
+    "colors": {
+        "r": 72,
+        "g": 224,
+        "b": 224,
+        "black": "#000000",
+        "light_black": "#02090b",
+        "grey": "#102225",
+        "red": "#ff657a",
+        "yellow": "#ffd56a",
+        "green": "#75ffb0",
+        "blue": "#74b9ff",
+        "magenta": "#d7a2ff",
+        "cyan": "#48e0e0",
+        "white": "#eaffff",
+        "brightBlack": "#587379",
+        "brightRed": "#ff8a9a",
+        "brightGreen": "#a0ffc7",
+        "brightYellow": "#ffe59d",
+        "brightBlue": "#a5d5ff",
+        "brightMagenta": "#e8c8ff",
+        "brightCyan": "#9dffff",
+        "brightWhite": "#ffffff"
+    },
+    "cssvars": {
+        "font_main": "United Sans Medium",
+        "font_main_light": "United Sans Light"
+    },
+    "terminal": {
+        "fontFamily": "Fira Mono",
+        "cursorStyle": "block",
+        "foreground": "#eaffff",
+        "background": "#02090b",
+        "cursor": "#48e0e0",
+        "cursorAccent": "#02090b",
+        "selection": "rgba(72,224,224,0.34)"
+    },
+    "globe": {
+        "base": "#02090b",
+        "marker": "#48e0e0",
+        "pin": "#ffd56a",
+        "satellite": "#eaffff"
+    },
+    "injectCSS": "button,input,select{letter-spacing:0;} .dev_window,.modal_popup{--aug-border-opacity:.72;}"
+}
