@@ -4,9 +4,15 @@ on:
   push:
     branches:
       - main
+    tags:
+      - "v*"
   pull_request:
     branches:
       - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build-windows:
@@ -29,9 +35,7 @@ jobs:
         run: npm ci --prefix src
 
       - name: Build Windows installer
-        run: npm run build-windows
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run build-windows -- --publish never
 
       - uses: actions/upload-artifact@v4
         with:
@@ -41,7 +45,6 @@ jobs:
 
   build-linux:
     runs-on: ubuntu-latest
-    needs: build-windows
     steps:
       - uses: actions/checkout@v4
 
@@ -60,12 +63,52 @@ jobs:
         run: npm ci --prefix src
 
       - name: Build Linux AppImage
-        run: npm run build-linux
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run build-linux -- --publish never
 
       - uses: actions/upload-artifact@v4
         with:
           name: Linux-AppImage
           path: dist/*.AppImage
           if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs:
+      - build-windows
+      - build-linux
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          mapfile -t files < <(find release-artifacts -type f \( -name '*.exe' -o -name '*.AppImage' \) | sort)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No release assets found."
+            exit 1
+          fi
+
+          title="eDEX Revival ${TAG_NAME}"
+          prerelease_args=()
+          if [[ "${TAG_NAME}" == *-* ]]; then
+            prerelease_args+=(--prerelease)
+          fi
+
+          if gh release view "${TAG_NAME}" >/dev/null 2>&1; then
+            gh release upload "${TAG_NAME}" "${files[@]}" --clobber
+          else
+            gh release create "${TAG_NAME}" "${files[@]}" \
+              --title "${title}" \
+              --generate-notes \
+              "${prerelease_args[@]}"
+          fi
