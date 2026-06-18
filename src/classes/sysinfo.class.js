@@ -36,6 +36,12 @@ class Sysinfo {
             </div>
         </div>`;
 
+        this.running = false;
+        if (!window.shouldStartWidgetInitially || window.shouldStartWidgetInitially("sysinfo")) this.start();
+    }
+    start() {
+        if (this.running) return false;
+        this.running = true;
         this.updateDate();
         this.updateUptime();
         this.uptimeUpdater = setInterval(() => {
@@ -44,9 +50,26 @@ class Sysinfo {
         this.updateBattery();
         this.batteryUpdater = setInterval(() => {
             this.updateBattery();
-        }, 3000);
+        }, window.performanceTiming ? window.performanceTiming().batteryInterval : 15000);
+        return true;
+    }
+    stop() {
+        if (this.uptimeUpdater) clearInterval(this.uptimeUpdater);
+        if (this.batteryUpdater) clearInterval(this.batteryUpdater);
+        if (this.dateUpdater) clearTimeout(this.dateUpdater);
+        this.uptimeUpdater = null;
+        this.batteryUpdater = null;
+        this.dateUpdater = null;
+        this.running = false;
+        return true;
+    }
+    refresh() {
+        this.updateDate();
+        this.updateUptime();
+        this.updateBattery();
     }
     updateDate() {
+        if (!this.running) return;
         let time = new Date();
 
         document.querySelector("#mod_sysinfo > div:first-child > h1").innerHTML = time.getFullYear();
@@ -93,7 +116,8 @@ class Sysinfo {
         document.querySelector("#mod_sysinfo > div:first-child > h2").innerHTML = month+" "+time.getDate();
 
         let timeToNewDay = ((23 - time.getHours()) * 3600000) + ((59 - time.getMinutes()) * 60000);
-        setTimeout(() => {
+        if (this.dateUpdater) clearTimeout(this.dateUpdater);
+        this.dateUpdater = setTimeout(() => {
             this.updateDate();
         }, timeToNewDay);
     }
@@ -117,7 +141,9 @@ class Sysinfo {
         document.querySelector("#mod_sysinfo > div:nth-child(2) > h2").innerHTML = uptime.days + '<span style="opacity:0.5;">d</span>' + uptime.hours + '<span style="opacity:0.5;">:</span>' + uptime.minutes;
     }
     updateBattery() {
+        if (!this.running) return;
         window.si.battery().then(bat => {
+            if (!this.running) return;
             let indicator = document.querySelector("#mod_sysinfo > div:last-child > h2");
             if (bat.hasBattery) {
                 if (bat.isCharging) {

@@ -29,16 +29,36 @@ class RAMwatcher {
         this.shuffleArray(this.points);
 
         // Init updaters
+        this.running = false;
         this.currentlyUpdating = false;
+        if (!window.shouldStartWidgetInitially || window.shouldStartWidgetInitially("memory")) this.start();
+    }
+    start() {
+        if (this.running) return false;
+        this.running = true;
         this.updateInfo();
         this.infoUpdater = setInterval(() => {
             this.updateInfo();
-        }, 1500);
+        }, window.performanceTiming ? window.performanceTiming().memoryInterval : 3000);
+        return true;
+    }
+    stop() {
+        if (this.infoUpdater) clearInterval(this.infoUpdater);
+        this.infoUpdater = null;
+        this.running = false;
+        return true;
+    }
+    refresh() {
+        this.updateInfo();
     }
     updateInfo() {
-        if (this.currentlyUpdating) return;
+        if (!this.running || this.currentlyUpdating) return;
         this.currentlyUpdating = true;
         window.si.mem().then(data => {
+            if (!this.running) {
+                this.currentlyUpdating = false;
+                return;
+            }
             if (!data || !data.total) {
                 this.currentlyUpdating = false;
                 return;

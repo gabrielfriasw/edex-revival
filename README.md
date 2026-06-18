@@ -103,9 +103,9 @@ npm run build-linux
 
 Build artifacts are written to `dist/`.
 
-## Privacy And AI
+## Privacy And Error To Fix
 
-AI features are disabled by default. When enabled, eDEX Revival can prepare local CLI prompts for Codex or Claude using terminal diagnostics or selected project context.
+Error to Fix is disabled by default. When enabled, eDEX Revival can prepare an editable, redacted prompt from the latest terminal diagnostic and hand it to a local Codex or Claude CLI command. It does not include a chat assistant, model downloads, or automatic command execution.
 
 Privacy controls can hide IP address, network interface name, geolocation, and live globe/network lookup behavior. The Privacy preset applies those defaults in one step.
 

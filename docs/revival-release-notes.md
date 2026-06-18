@@ -24,6 +24,7 @@ First Revival release of eDEX, focused on keeping the original sci-fi terminal i
 - Existing settings are merged forward on boot.
 - LSP/debugger/extension marketplace work remains out of scope for this package.
 - AI actions remain hidden unless `ai.enabled` is explicitly true.
+- No chat assistant, model download, SSH password storage, or API key storage is included.
 - SSH profiles store host, user, port, key path, remote cwd, and extra args only; authentication stays with the native SSH client.
 - Build hosts should use Node 24.x to avoid engine warnings from the package metadata.
 - Release binaries are unsigned, so Windows SmartScreen can warn until the app builds reputation.

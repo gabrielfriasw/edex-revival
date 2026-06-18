@@ -23,22 +23,43 @@ class HardwareInspector {
 
         this.parent.append(this._element);
 
+        this.running = false;
+        this.currentlyUpdating = false;
+        if (!window.shouldStartWidgetInitially || window.shouldStartWidgetInitially("hardware")) this.start();
+    }
+    start() {
+        if (this.running) return false;
+        this.running = true;
         this.updateInfo();
-        this.infoUpdater = setInterval(() => {
-            this.updateInfo();
-        }, 20000);
+        return true;
+    }
+    stop() {
+        this.running = false;
+        return true;
+    }
+    refresh() {
+        this.updateInfo();
     }
     updateInfo() {
+        if (!this.running || this.currentlyUpdating) return;
+        this.currentlyUpdating = true;
         window.si.system().then(d => {
-            window.si.chassis().then(e => {
+            return window.si.chassis().then(e => {
+                if (!this.running) {
+                    this.currentlyUpdating = false;
+                    return;
+                }
                 document.getElementById("mod_hardwareInspector_manufacturer").innerText = this._trimDataString(d.manufacturer);
                 document.getElementById("mod_hardwareInspector_model").innerText = this._trimDataString(d.model, d.manufacturer, e.type);
                 document.getElementById("mod_hardwareInspector_chassis").innerText = e.type;
+                this.currentlyUpdating = false;
             });
+        }).catch(() => {
+            this.currentlyUpdating = false;
         });
     }
     _trimDataString(str, ...filters) {
-        return str.trim().split(" ").filter(word => {
+        return String(str || "").trim().split(" ").filter(word => {
             if (typeof filters !== "object") return true;
 
             return !filters.includes(word);

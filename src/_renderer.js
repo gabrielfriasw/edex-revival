@@ -148,6 +148,167 @@ window.defaultLauncherRailSettings = () => ({
     autoHide: true
 });
 
+window.defaultAiSettings = () => ({
+    enabled: false,
+    provider: "auto",
+    defaultProvider: "auto",
+    contextBytes: 60000,
+    redactSecrets: true,
+    commands: {
+        codex: "codex",
+        claude: "claude"
+    }
+});
+
+window.defaultPerformanceSettings = () => ({
+    profile: "cinematic",
+    systemInfoWorkers: 2,
+    maxSystemInfoWorkers: 2,
+    systemInfoWorkerIdleMs: 30000,
+    systemInfoWorkerScaleDelayMs: 750,
+    pauseHiddenWidgets: false,
+    pauseWhenWindowBlurred: false,
+    enableGlobeByDefault: true,
+    enableTerminalWebGL: true,
+    enableTerminalLigatures: true,
+    enableFeedbackAudio: true,
+    enableCinematicAudio: true,
+    lazyAudio: false,
+    disableBackgroundThrottling: true,
+    enableErrorLens: "ai-only"
+});
+
+window.performanceProfileTimings = profile => {
+    const profiles = {
+        balanced: {
+            cpuLoadInterval: 1500,
+            cpuTempInterval: 5000,
+            cpuSpeedInterval: 5000,
+            cpuTasksInterval: 5000,
+            toplistInterval: 5000,
+            processListInterval: 2500,
+            memoryInterval: 3000,
+            batteryInterval: 15000,
+            networkStatusInterval: 2000,
+            networkTrafficInterval: 2000,
+            globeLocationInterval: 5000,
+            globeConnectionsInterval: 5000,
+            cpuChartFPS: 12,
+            networkChartFPS: 12,
+            globeFPS: 18,
+            filesystemWatcherDebounce: 1000,
+            terminalAnalysisDebounce: 150
+        },
+        max: {
+            cpuLoadInterval: 3000,
+            cpuTempInterval: 10000,
+            cpuSpeedInterval: 10000,
+            cpuTasksInterval: 10000,
+            toplistInterval: 10000,
+            processListInterval: 5000,
+            memoryInterval: 6000,
+            batteryInterval: 30000,
+            networkStatusInterval: 5000,
+            networkTrafficInterval: 5000,
+            globeLocationInterval: 15000,
+            globeConnectionsInterval: 15000,
+            cpuChartFPS: 6,
+            networkChartFPS: 6,
+            globeFPS: 0,
+            filesystemWatcherDebounce: 1500,
+            terminalAnalysisDebounce: 250
+        },
+        cinematic: {
+            cpuLoadInterval: 1000,
+            cpuTempInterval: 5000,
+            cpuSpeedInterval: 5000,
+            cpuTasksInterval: 5000,
+            toplistInterval: 5000,
+            processListInterval: 2000,
+            memoryInterval: 2500,
+            batteryInterval: 15000,
+            networkStatusInterval: 2000,
+            networkTrafficInterval: 1500,
+            globeLocationInterval: 3000,
+            globeConnectionsInterval: 3000,
+            cpuChartFPS: 24,
+            networkChartFPS: 24,
+            globeFPS: 30,
+            filesystemWatcherDebounce: 800,
+            terminalAnalysisDebounce: 120
+        }
+    };
+    return Object.assign({}, profiles.balanced, profiles[profile] || {});
+};
+
+window.normalizePerformanceSettings = performance => {
+    const defaults = window.defaultPerformanceSettings();
+    const source = performance && typeof performance === "object" && !Array.isArray(performance) ? performance : {};
+    const next = Object.assign({}, defaults, source);
+    if (!["balanced", "max", "cinematic"].includes(next.profile)) next.profile = "balanced";
+    next.systemInfoWorkers = Number.isInteger(Number(next.systemInfoWorkers)) ? Math.max(1, Math.min(4, Number(next.systemInfoWorkers))) : defaults.systemInfoWorkers;
+    next.maxSystemInfoWorkers = Number.isInteger(Number(next.maxSystemInfoWorkers)) ? Math.max(next.systemInfoWorkers, Math.min(4, Number(next.maxSystemInfoWorkers))) : defaults.maxSystemInfoWorkers;
+    next.systemInfoWorkerIdleMs = Number.isInteger(Number(next.systemInfoWorkerIdleMs)) ? Math.max(5000, Math.min(300000, Number(next.systemInfoWorkerIdleMs))) : defaults.systemInfoWorkerIdleMs;
+    next.systemInfoWorkerScaleDelayMs = Number.isInteger(Number(next.systemInfoWorkerScaleDelayMs)) ? Math.max(100, Math.min(60000, Number(next.systemInfoWorkerScaleDelayMs))) : defaults.systemInfoWorkerScaleDelayMs;
+    if (next.profile !== "cinematic") {
+        const minimumScaleDelayMs = next.profile === "max" ? 15000 : defaults.systemInfoWorkerScaleDelayMs;
+        next.systemInfoWorkerScaleDelayMs = Math.max(minimumScaleDelayMs, next.systemInfoWorkerScaleDelayMs);
+    }
+    next.pauseHiddenWidgets = next.pauseHiddenWidgets !== false;
+    next.pauseWhenWindowBlurred = next.pauseWhenWindowBlurred !== false;
+    next.enableGlobeByDefault = next.enableGlobeByDefault !== false;
+    next.enableTerminalWebGL = next.enableTerminalWebGL !== false;
+    next.enableTerminalLigatures = next.enableTerminalLigatures === true;
+    next.enableFeedbackAudio = next.enableFeedbackAudio === true;
+    next.enableCinematicAudio = next.profile === "cinematic"
+        ? next.enableCinematicAudio !== false
+        : next.enableCinematicAudio === true;
+    next.lazyAudio = next.lazyAudio === true;
+    next.disableBackgroundThrottling = next.disableBackgroundThrottling !== false;
+    if (!["off", "ai-only", "always"].includes(next.enableErrorLens)) next.enableErrorLens = "ai-only";
+    if (next.profile === "max") {
+        next.enableGlobeByDefault = false;
+        next.enableFeedbackAudio = false;
+        next.enableCinematicAudio = false;
+        next.lazyAudio = true;
+        next.disableBackgroundThrottling = false;
+    }
+    return next;
+};
+
+window.performanceSettings = () => {
+    window.settings.performance = window.normalizePerformanceSettings(window.settings.performance);
+    return window.settings.performance;
+};
+
+window.performanceTiming = () => window.performanceProfileTimings(window.performanceSettings().profile);
+
+window.shouldCaptureTerminalErrorLens = () => {
+    const perf = window.performanceSettings();
+    if (perf.enableErrorLens === "off") return false;
+    if (perf.enableErrorLens === "always") return true;
+    if (window.settings && window.settings.ai && window.settings.ai.enabled === true) return true;
+    return Number(window.terminalDiagnosticsActiveUntil || 0) > Date.now();
+};
+
+window.normalizeAiSettings = ai => {
+    const defaults = window.defaultAiSettings();
+    const source = ai && typeof ai === "object" && !Array.isArray(ai) ? ai : {};
+    const next = Object.assign({}, defaults, source);
+    next.enabled = next.enabled === true;
+    const validProviders = ["auto", "codex", "claude"];
+    next.provider = validProviders.includes(next.provider) ? next.provider : (validProviders.includes(next.defaultProvider) ? next.defaultProvider : "auto");
+    next.defaultProvider = validProviders.includes(next.defaultProvider) ? next.defaultProvider : next.provider;
+    if (next.defaultProvider === "auto" && next.provider !== "auto") next.defaultProvider = next.provider;
+    next.contextBytes = Number(next.contextBytes) || defaults.contextBytes;
+    next.redactSecrets = next.redactSecrets !== false;
+    next.commands = Object.assign({}, defaults.commands, source.commands || {});
+    next.commands.codex = String(next.commands.codex || "codex");
+    next.commands.claude = String(next.commands.claude || "claude");
+    delete next.ollama;
+    return next;
+};
+
 window.normalizeRevivalSettings = () => {
     const validPresets = Object.keys(window.revivalLayoutPresets());
     if (!validPresets.includes(window.settings.layoutPreset)) window.settings.layoutPreset = "classic";
@@ -162,12 +323,14 @@ window.normalizeRevivalSettings = () => {
     }
     if (!window.settings.widgets) window.settings.widgets = {};
     if (!["full", "reduced", "offline", "hidden"].includes(window.settings.widgets.globeMode)) window.settings.widgets.globeMode = "full";
+    window.settings.performance = window.normalizePerformanceSettings(window.settings.performance);
     if (!window.settings.editor) window.settings.editor = {};
     if (!["smart", "editor", "preview", "external", "ask"].includes(window.settings.editor.defaultOpenBehavior)) {
         window.settings.editor.defaultOpenBehavior = "smart";
     }
     if (!window.settings.plugins) window.settings.plugins = {enabled: true, paths: [], disabled: [], errors: {}, permissions: {}};
     if (!window.settings.plugins.errors) window.settings.plugins.errors = {};
+    window.settings.ai = window.normalizeAiSettings(window.settings.ai);
     window.settings.ssh = window.normalizeSshSettings(window.settings.ssh);
     return window.settings;
 };
@@ -440,6 +603,7 @@ function initSystemInformationProxy() {
         get: (target, prop, receiver) => {
             return function(...args) {
                 let callback = (typeof args[args.length - 1] === "function") ? true : false;
+                let sendArgs = callback ? args.slice(0, -1) : args;
 
                 return new Promise((resolve, reject) => {
                     let id = nanoid();
@@ -449,7 +613,7 @@ function initSystemInformationProxy() {
                         }
                         resolve(res);
                     });
-                    ipc.send("systeminformation-call", prop, id, ...args);
+                    ipc.send("systeminformation-call", prop, id, ...sendArgs);
                 });
             };
         }
@@ -687,7 +851,7 @@ window.renderLauncherRail = () => {
         ["theme", "theme", "Theme Tools"],
         ["layout", "layout", "Layout Tools"]
     ];
-    if (window.settings && window.settings.ai && window.settings.ai.enabled !== false) {
+    if (window.settings && window.settings.ai && window.settings.ai.enabled === true) {
         actions.splice(5, 0, ["errorfix", "diagnostics", "Fix"]);
     }
     if (!existing) {
@@ -943,6 +1107,100 @@ window.isWidgetVisible = key => {
     return widgets.visible !== false && widgets[key] !== false;
 };
 
+window.__edexWindowBlurred = false;
+window.areWidgetTimersPaused = () => {
+    const perf = window.performanceSettings();
+    return perf.pauseWhenWindowBlurred !== false && (document.hidden || window.__edexWindowBlurred === true);
+};
+
+window.setWidgetRuntime = (key, shouldRun) => {
+    const map = {
+        clock: "clock",
+        sysinfo: "sysinfo",
+        hardware: "hardwareInspector",
+        cpu: "cpuinfo",
+        memory: "ramwatcher",
+        processes: "toplist",
+        networkStatus: "netstat",
+        networkTraffic: "conninfo",
+        globe: "globe"
+    };
+    const mod = window.mods && window.mods[map[key]];
+    if (!mod) return false;
+    if (shouldRun && typeof mod.start === "function") return mod.start();
+    if (!shouldRun && typeof mod.stop === "function") return mod.stop();
+    return false;
+};
+
+window.shouldStartWidgetInitially = key => {
+    const perf = window.performanceSettings();
+    if (perf.pauseHiddenWidgets === false) return true;
+    const widgets = window.normalizeWidgetSettings();
+    const visible = widgets.visible !== false;
+    const states = {
+        clock: visible && widgets.systemPanel !== false && widgets.clock !== false,
+        sysinfo: visible && widgets.systemPanel !== false && widgets.sysinfo !== false,
+        hardware: visible && widgets.systemPanel !== false && widgets.hardware !== false,
+        cpu: visible && widgets.systemPanel !== false && widgets.cpu !== false,
+        memory: visible && widgets.systemPanel !== false && widgets.memory !== false,
+        processes: visible && widgets.systemPanel !== false && widgets.processes !== false,
+        networkStatus: visible && widgets.networkPanel !== false && widgets.networkStatus !== false,
+        networkTraffic: visible && widgets.networkPanel !== false && widgets.networkTraffic !== false,
+        globe: visible && widgets.networkPanel !== false && widgets.globe !== false && widgets.globeMode !== "hidden" && perf.enableGlobeByDefault !== false
+    };
+    return !!states[key] && !window.areWidgetTimersPaused();
+};
+
+window.syncWidgetLifecycles = states => {
+    const perf = window.performanceSettings();
+    if (perf.pauseHiddenWidgets === false) return false;
+    const runtimePaused = window.areWidgetTimersPaused();
+    Object.keys(states).forEach(key => {
+        window.setWidgetRuntime(key, states[key] && !runtimePaused);
+    });
+    return true;
+};
+
+window.collectWidgetRuntimeDiagnostics = () => {
+    const map = {
+        clock: "clock",
+        sysinfo: "sysinfo",
+        hardware: "hardwareInspector",
+        cpu: "cpuinfo",
+        memory: "ramwatcher",
+        processes: "toplist",
+        networkStatus: "netstat",
+        networkTraffic: "conninfo",
+        globe: "globe"
+    };
+    const widgets = {};
+    Object.keys(map).forEach(key => {
+        const mod = window.mods && window.mods[map[key]];
+        widgets[key] = {
+            constructed: !!mod,
+            running: !!(mod && mod.running),
+            timers: mod ? Object.keys(mod).filter(name => /Updater|Timer|Timeout|Frame|Interval/.test(name) && mod[name]) : []
+        };
+    });
+    return {
+        profile: window.performanceSettings().profile,
+        pausedByWindowState: window.areWidgetTimersPaused(),
+        widgets
+    };
+};
+
+window.addEventListener("blur", () => {
+    window.__edexWindowBlurred = true;
+    if (typeof window.applyWidgetVisibility === "function") window.applyWidgetVisibility();
+});
+window.addEventListener("focus", () => {
+    window.__edexWindowBlurred = false;
+    if (typeof window.applyWidgetVisibility === "function") window.applyWidgetVisibility();
+});
+document.addEventListener("visibilitychange", () => {
+    if (typeof window.applyWidgetVisibility === "function") window.applyWidgetVisibility();
+});
+
 window.fitCurrentTerminal = () => {
     setTimeout(() => {
         try {
@@ -953,8 +1211,10 @@ window.fitCurrentTerminal = () => {
 
 window.applyWidgetVisibility = () => {
     const widgets = window.normalizeWidgetSettings();
+    const perf = window.performanceSettings();
     const visible = widgets.visible !== false;
     const globeMode = widgets.globeMode || "full";
+    const globeEnabled = perf.enableGlobeByDefault !== false;
     const hidden = [];
     const setHidden = (selector, hide, key) => {
         document.querySelectorAll(selector).forEach(element => element.classList.toggle("widget-hidden", hide));
@@ -972,7 +1232,18 @@ window.applyWidgetVisibility = () => {
     setHidden("#mod_toplist", !visible || widgets.systemPanel === false || widgets.processes === false, "processes");
     setHidden("#mod_netstat", !visible || widgets.networkPanel === false || widgets.networkStatus === false, "networkStatus");
     setHidden("#mod_conninfo", !visible || widgets.networkPanel === false || widgets.networkTraffic === false, "networkTraffic");
-    setHidden("#mod_globe", !visible || widgets.networkPanel === false || widgets.globe === false || globeMode === "hidden", "globe");
+    setHidden("#mod_globe", !visible || widgets.networkPanel === false || widgets.globe === false || globeMode === "hidden" || !globeEnabled, "globe");
+    window.syncWidgetLifecycles({
+        clock: visible && widgets.systemPanel !== false && widgets.clock !== false,
+        sysinfo: visible && widgets.systemPanel !== false && widgets.sysinfo !== false,
+        hardware: visible && widgets.systemPanel !== false && widgets.hardware !== false,
+        cpu: visible && widgets.systemPanel !== false && widgets.cpu !== false,
+        memory: visible && widgets.systemPanel !== false && widgets.memory !== false,
+        processes: visible && widgets.systemPanel !== false && widgets.processes !== false,
+        networkStatus: visible && widgets.networkPanel !== false && widgets.networkStatus !== false,
+        networkTraffic: visible && widgets.networkPanel !== false && widgets.networkTraffic !== false,
+        globe: visible && widgets.networkPanel !== false && widgets.globe !== false && globeMode !== "hidden" && globeEnabled
+    });
 
     document.body.classList.toggle("widgets-hidden", !visible);
     document.body.classList.toggle("widgets-keyboard-hidden", !visible || widgets.keyboard === false);
@@ -999,9 +1270,11 @@ window.applyWidgetVisibility = () => {
 
 window.isGlobeLiveMode = () => {
     const widgets = window.normalizeWidgetSettings();
+    const perf = window.performanceSettings();
     return widgets.visible !== false
         && widgets.networkPanel !== false
         && widgets.globe !== false
+        && perf.enableGlobeByDefault !== false
         && !["offline", "hidden"].includes(widgets.globeMode || "full");
 };
 
@@ -1253,7 +1526,7 @@ window.openSettings = async () => {
         ifaces += `<option value="${window._escapeHtml(net.iface)}" ${net.iface === currentIface ? "selected" : ""}>${window._escapeHtml(ifaceLabel(net))}</option>`;
     });
     let startupStatus = await edex.startup.get();
-    let aiSettings = window.settings.ai || {};
+    let aiSettings = window.normalizeAiSettings(window.settings.ai || {});
     let aiCommands = aiSettings.commands || {};
     let aiSettingsHidden = "";
     let devExplorerSettings = window.settings.devExplorer || {};
@@ -1261,6 +1534,7 @@ window.openSettings = async () => {
     let widgetSettings = window.normalizeWidgetSettings();
     let terminalStyle = window.settings.terminalStyle || {};
     let launcherRailSettings = Object.assign(window.defaultLauncherRailSettings(), window.settings.launcherRail || {});
+    let performanceSettings = window.performanceSettings();
 
     // Unlink the tactile keyboard from the terminal emulator to allow filling in the settings fields
     window.keyboard.detach();
@@ -1325,6 +1599,118 @@ window.openSettings = async () => {
                         <td>Recommended Revival layout preset</td>
                         <td><select id="settingsEditor-layoutPreset">
                             ${window.layoutPresetOptions(window.settings.layoutPreset || "classic")}
+                        </select></td>
+                    </tr>
+                    <tr>
+                        <td>performance.profile</td>
+                        <td>Runtime budget for polling, charts, and diagnostics</td>
+                        <td><select id="settingsEditor-performance-profile">
+                            <option>${performanceSettings.profile}</option>
+                            <option>balanced</option>
+                            <option>max</option>
+                            <option>cinematic</option>
+                        </select></td>
+                    </tr>
+                    <tr>
+                        <td>performance.systemInfoWorkers</td>
+                        <td>Lazy systeminformation workers kept available after the first request</td>
+                        <td><input type="number" id="settingsEditor-performance-systemInfoWorkers" value="${performanceSettings.systemInfoWorkers}" min="1" max="4"></td>
+                    </tr>
+                    <tr>
+                        <td>performance.maxSystemInfoWorkers</td>
+                        <td>Maximum workers when systeminformation calls queue up</td>
+                        <td><input type="number" id="settingsEditor-performance-maxSystemInfoWorkers" value="${performanceSettings.maxSystemInfoWorkers}" min="1" max="4"></td>
+                    </tr>
+                    <tr>
+                        <td>performance.systemInfoWorkerIdleMs</td>
+                        <td>Milliseconds before extra systeminformation workers are stopped</td>
+                        <td><input type="number" id="settingsEditor-performance-systemInfoWorkerIdleMs" value="${performanceSettings.systemInfoWorkerIdleMs}" min="5000" max="300000"></td>
+                    </tr>
+                    <tr>
+                        <td>performance.systemInfoWorkerScaleDelayMs</td>
+                        <td>Milliseconds a queued call waits before creating extra workers</td>
+                        <td><input type="number" id="settingsEditor-performance-systemInfoWorkerScaleDelayMs" value="${performanceSettings.systemInfoWorkerScaleDelayMs}" min="100" max="60000"></td>
+                    </tr>
+                    <tr>
+                        <td>performance.pauseHiddenWidgets</td>
+                        <td>Stop polling, chart streams, and globe work for hidden widgets</td>
+                        <td><select id="settingsEditor-performance-pauseHiddenWidgets">
+                            <option>${performanceSettings.pauseHiddenWidgets !== false}</option>
+                            <option>${performanceSettings.pauseHiddenWidgets === false}</option>
+                        </select></td>
+                    </tr>
+                    <tr>
+                        <td>performance.pauseWhenWindowBlurred</td>
+                        <td>Pause widget work while the app window is hidden or unfocused</td>
+                        <td><select id="settingsEditor-performance-pauseWhenWindowBlurred">
+                            <option>${performanceSettings.pauseWhenWindowBlurred !== false}</option>
+                            <option>${performanceSettings.pauseWhenWindowBlurred === false}</option>
+                        </select></td>
+                    </tr>
+                    <tr>
+                        <td>performance.disableBackgroundThrottling</td>
+                        <td>Keep renderer work active when Electron would normally throttle the window</td>
+                        <td><select id="settingsEditor-performance-disableBackgroundThrottling">
+                            <option>${performanceSettings.disableBackgroundThrottling !== false}</option>
+                            <option>${performanceSettings.disableBackgroundThrottling === false}</option>
+                        </select></td>
+                    </tr>
+                    <tr>
+                        <td>performance.enableGlobeByDefault</td>
+                        <td>Allow the globe WebGL scene to initialize when visible</td>
+                        <td><select id="settingsEditor-performance-enableGlobeByDefault">
+                            <option>${performanceSettings.enableGlobeByDefault !== false}</option>
+                            <option>${performanceSettings.enableGlobeByDefault === false}</option>
+                        </select></td>
+                    </tr>
+                    <tr>
+                        <td>performance.enableTerminalWebGL</td>
+                        <td>Use xterm's WebGL renderer when available</td>
+                        <td><select id="settingsEditor-performance-enableTerminalWebGL">
+                            <option>${performanceSettings.enableTerminalWebGL !== false}</option>
+                            <option>${performanceSettings.enableTerminalWebGL === false}</option>
+                        </select></td>
+                    </tr>
+                    <tr>
+                        <td>performance.enableTerminalLigatures</td>
+                        <td>Load terminal font ligature shaping</td>
+                        <td><select id="settingsEditor-performance-enableTerminalLigatures">
+                            <option>${performanceSettings.enableTerminalLigatures === true}</option>
+                            <option>${performanceSettings.enableTerminalLigatures !== true}</option>
+                        </select></td>
+                    </tr>
+                    <tr>
+                        <td>performance.enableFeedbackAudio</td>
+                        <td>Enable recurring keyboard/stdout feedback sounds</td>
+                        <td><select id="settingsEditor-performance-enableFeedbackAudio">
+                            <option>${performanceSettings.enableFeedbackAudio === true}</option>
+                            <option>${performanceSettings.enableFeedbackAudio !== true}</option>
+                        </select></td>
+                    </tr>
+                    <tr>
+                        <td>performance.enableCinematicAudio</td>
+                        <td>Enable startup and interface cinematic sounds</td>
+                        <td><select id="settingsEditor-performance-enableCinematicAudio">
+                            <option>${performanceSettings.enableCinematicAudio === true}</option>
+                            <option>${performanceSettings.enableCinematicAudio !== true}</option>
+                        </select></td>
+                    </tr>
+                    <tr>
+                        <td>performance.lazyAudio</td>
+                        <td>Load audio files on first use instead of during AudioManager startup</td>
+                        <td><select id="settingsEditor-performance-lazyAudio">
+                            <option>${performanceSettings.lazyAudio === true}</option>
+                            <option>${performanceSettings.lazyAudio !== true}</option>
+                        </select></td>
+                    </tr>
+                    <tr>
+                        <td>performance.enableErrorLens</td>
+                        <td>Terminal error analysis mode</td>
+                        <td><select id="settingsEditor-performance-enableErrorLens">
+                            <option>${performanceSettings.enableErrorLens || "ai-only"}</option>
+                            <option>ai-only</option>
+                            <option>always</option>
+                            <option>off</option>
                         </select></td>
                     </tr>
                     <tr>
@@ -1615,17 +2001,17 @@ window.openSettings = async () => {
                     </tr>
                     <tr${aiSettingsHidden}>
                         <td>ai.enabled</td>
-                        <td>Enable local AI CLI integration</td>
+                        <td>Enable Error to Fix prompt handoff</td>
                         <td><select id="settingsEditor-ai-enabled">
-                            <option>${aiSettings.enabled !== false}</option>
-                            <option>${aiSettings.enabled === false}</option>
+                            <option>${aiSettings.enabled === true}</option>
+                            <option>${aiSettings.enabled !== true}</option>
                         </select></td>
                     </tr>
                     <tr${aiSettingsHidden}>
                         <td>ai.defaultProvider</td>
-                        <td>Preferred local AI CLI provider</td>
+                        <td>Preferred local CLI provider for Error to Fix</td>
                         <td><select id="settingsEditor-ai-defaultProvider">
-                            <option>${aiSettings.defaultProvider || "auto"}</option>
+                            <option>${aiSettings.defaultProvider || aiSettings.provider || "auto"}</option>
                             <option>auto</option>
                             <option>codex</option>
                             <option>claude</option>
@@ -1633,12 +2019,12 @@ window.openSettings = async () => {
                     </tr>
                     <tr${aiSettingsHidden}>
                         <td>ai.contextBytes</td>
-                        <td>Maximum prompt context bytes sent to local AI CLIs</td>
+                        <td>Maximum prompt context bytes sent after redaction</td>
                         <td><input type="number" id="settingsEditor-ai-contextBytes" value="${Number(aiSettings.contextBytes) || 60000}"></td>
                     </tr>
                     <tr${aiSettingsHidden}>
                         <td>ai.redactSecrets</td>
-                        <td>Redact common token and key patterns before launching AI CLIs</td>
+                        <td>Redact common token and key patterns before launching Error to Fix</td>
                         <td><select id="settingsEditor-ai-redactSecrets">
                             <option>${aiSettings.redactSecrets !== false}</option>
                             <option>${aiSettings.redactSecrets === false}</option>
@@ -1852,6 +2238,7 @@ window.settingsSectionForKey = key => {
     if (/^ai\./.test(key)) return "ai";
     if (/^widgets\./.test(key)) return "widgets";
     if (/^privacy\./.test(key)) return "privacy";
+    if (/^performance\./.test(key)) return "performance";
     if (/^theme$|^layoutPreset$|^launcherRail\.|^keyboard$|^monitor$|^clockHours$|^nointro$|^nocursor$|^allowWindowed$|^keepGeometry$/.test(key)) return "appearance";
     if (/^iface$|^pingAddr$/.test(key)) return "network";
     if (/^shell|^cwd$|^env$|^termFontSize$|^terminalStyle\.|^terminal\.|^port$|^launchOnStartup$/.test(key)) return "terminal";
@@ -1872,6 +2259,7 @@ window.enhanceSettingsEditor = () => {
         ["editor", "Editor"],
         ["widgets", "Widgets"],
         ["privacy", "Privacy"],
+        ["performance", "Performance"],
         ["network", "Network"],
         ["ai", "AI"],
         ["advanced", "Advanced"]
@@ -2015,6 +2403,21 @@ window.settingsEditorDefaults = () => Object.assign({
     keyboard: "en-US",
     theme: "tron",
     layoutPreset: "classic",
+    "performance.profile": "cinematic",
+    "performance.systemInfoWorkers": 2,
+    "performance.maxSystemInfoWorkers": 2,
+    "performance.systemInfoWorkerIdleMs": 30000,
+    "performance.systemInfoWorkerScaleDelayMs": 750,
+    "performance.pauseHiddenWidgets": false,
+    "performance.pauseWhenWindowBlurred": false,
+    "performance.enableGlobeByDefault": true,
+    "performance.enableTerminalWebGL": true,
+    "performance.enableTerminalLigatures": true,
+    "performance.enableFeedbackAudio": true,
+    "performance.enableCinematicAudio": true,
+    "performance.lazyAudio": false,
+    "performance.disableBackgroundThrottling": true,
+    "performance.enableErrorLens": "ai-only",
     "launcherRail.enabled": true,
     "launcherRail.position": "top",
     "launcherRail.compact": false,
@@ -2215,6 +2618,10 @@ window.validateSettingsEditor = () => {
 
     integerInRange("settingsEditor-port", "Terminal port", 1, 65535);
     integerInRange("settingsEditor-termFontSize", "Terminal font size", 6, 72);
+    integerInRange("settingsEditor-performance-systemInfoWorkers", "System information workers", 1, 4);
+    integerInRange("settingsEditor-performance-maxSystemInfoWorkers", "Maximum system information workers", 1, 4);
+    integerInRange("settingsEditor-performance-systemInfoWorkerIdleMs", "System information worker idle timeout", 5000, 300000);
+    integerInRange("settingsEditor-performance-systemInfoWorkerScaleDelayMs", "System information worker scale delay", 100, 60000);
     floatInRange("settingsEditor-audioVolume", "Audio volume", 0, 1);
     integerInRange("settingsEditor-editor-fontSize", "Editor font size", 8, 72);
     integerInRange("settingsEditor-editor-tabSize", "Editor tab size", 1, 16);
@@ -2245,13 +2652,22 @@ window.validateSettingsEditor = () => {
     if (!["list", "grid", "columns", "dualPane"].includes(explorerView)) errors.push("Explorer default view is invalid.");
 
     if (value("settingsEditor-launcherRail-position") !== "top") errors.push("Launcher header position is invalid.");
+    if (!["balanced", "max", "cinematic"].includes(value("settingsEditor-performance-profile"))) errors.push("Performance profile is invalid.");
+    if (Number(value("settingsEditor-performance-maxSystemInfoWorkers")) < Number(value("settingsEditor-performance-systemInfoWorkers"))) {
+        errors.push("Maximum system information workers must be greater than or equal to the baseline worker count.");
+    }
+    if (!["off", "ai-only", "always"].includes(value("settingsEditor-performance-enableErrorLens"))) errors.push("Error Lens mode is invalid.");
     if (!["full", "reduced", "offline", "hidden"].includes(value("settingsEditor-widgets-globeMode"))) errors.push("Globe mode is invalid.");
     if (!["smart", "editor", "preview", "external", "ask"].includes(value("settingsEditor-editor-defaultOpenBehavior"))) {
         errors.push("Editor default open behavior is invalid.");
     }
 
+    if (!["auto", "codex", "claude"].includes(value("settingsEditor-ai-defaultProvider"))) {
+        errors.push("AI provider is invalid.");
+    }
+
     if (window.settingsEditorValue("settingsEditor-ai-enabled") === "true") {
-        warnings.push("AI integration is enabled; local CLI prompts may include project context after redaction.");
+        warnings.push("Error to Fix is enabled; terminal diagnostics may be sent to the selected local CLI provider after redaction.");
     }
 
     return {
@@ -2290,6 +2706,23 @@ window.writeSettingsFile = () => {
             labels: (document.getElementById("settingsEditor-launcherRail-labels").value === "true"),
             autoHide: true
         },
+        performance: {
+            profile: document.getElementById("settingsEditor-performance-profile").value,
+            systemInfoWorkers: Number(document.getElementById("settingsEditor-performance-systemInfoWorkers").value),
+            maxSystemInfoWorkers: Number(document.getElementById("settingsEditor-performance-maxSystemInfoWorkers").value),
+            systemInfoWorkerIdleMs: Number(document.getElementById("settingsEditor-performance-systemInfoWorkerIdleMs").value),
+            systemInfoWorkerScaleDelayMs: Number(document.getElementById("settingsEditor-performance-systemInfoWorkerScaleDelayMs").value),
+            pauseHiddenWidgets: (document.getElementById("settingsEditor-performance-pauseHiddenWidgets").value === "true"),
+            pauseWhenWindowBlurred: (document.getElementById("settingsEditor-performance-pauseWhenWindowBlurred").value === "true"),
+            disableBackgroundThrottling: (document.getElementById("settingsEditor-performance-disableBackgroundThrottling").value === "true"),
+            enableGlobeByDefault: (document.getElementById("settingsEditor-performance-enableGlobeByDefault").value === "true"),
+            enableTerminalWebGL: (document.getElementById("settingsEditor-performance-enableTerminalWebGL").value === "true"),
+            enableTerminalLigatures: (document.getElementById("settingsEditor-performance-enableTerminalLigatures").value === "true"),
+            enableFeedbackAudio: (document.getElementById("settingsEditor-performance-enableFeedbackAudio").value === "true"),
+            enableCinematicAudio: (document.getElementById("settingsEditor-performance-enableCinematicAudio").value === "true"),
+            lazyAudio: (document.getElementById("settingsEditor-performance-lazyAudio").value === "true"),
+            enableErrorLens: document.getElementById("settingsEditor-performance-enableErrorLens").value
+        },
         termFontSize: Number(document.getElementById("settingsEditor-termFontSize").value),
         terminalStyle: {
             foreground: document.getElementById("settingsEditor-terminalStyle-foreground").value.trim(),
@@ -2312,6 +2745,7 @@ window.writeSettingsFile = () => {
         launchOnStartup: (document.getElementById("settingsEditor-launchOnStartup").value === "true"),
         ai: {
             enabled: (document.getElementById("settingsEditor-ai-enabled").value === "true"),
+            provider: document.getElementById("settingsEditor-ai-defaultProvider").value,
             defaultProvider: document.getElementById("settingsEditor-ai-defaultProvider").value,
             contextBytes: Number(document.getElementById("settingsEditor-ai-contextBytes").value),
             redactSecrets: (document.getElementById("settingsEditor-ai-redactSecrets").value === "true"),
@@ -2420,13 +2854,11 @@ window.toggleFullScreen = () => {
     fs.writeFileSync(lastWindowStateFile, JSON.stringify(window.lastWindowState, "", 4));
 };
 
-window.isAiIntegrationEnabled = () => !!(window.settings && window.settings.ai && window.settings.ai.enabled !== false);
+window.isAiIntegrationEnabled = () => !!(window.settings && window.settings.ai && window.settings.ai.enabled === true);
 
 // Display available keyboard shortcuts and custom shortcuts helper
 window.openShortcutsHelp = () => {
     if (document.getElementById("settingsEditor")) return;
-    const aiEnabled = window.isAiIntegrationEnabled();
-
     const shortcutsDefinition = {
         "COPY": "Copy selected buffer from the terminal.",
         "PASTE": "Paste system clipboard to the terminal.",
@@ -2443,11 +2875,11 @@ window.openShortcutsHelp = () => {
         "DEV_DEBUG": "Open Chromium Dev Tools, for debugging purposes.",
         "DEV_RELOAD": "Trigger front-end hot reload."
     };
-    if (aiEnabled) shortcutsDefinition.AI_COMMAND_CENTER = "Open the AI Command Center.";
 
     let appList = "";
-    window.shortcuts.filter(e => e.type === "app" && (aiEnabled || e.action !== "AI_COMMAND_CENTER")).forEach(cut => {
+    window.shortcuts.filter(e => e.type === "app").forEach(cut => {
         let action = (cut.action.startsWith("TAB_")) ? "TAB_X" : cut.action;
+        if (!shortcutsDefinition[action]) return;
 
         appList += `<tr>
                         <td>${(cut.enabled) ? 'YES' : 'NO'}</td>
@@ -2578,10 +3010,6 @@ window.useAppShortcut = action => {
         case "TOGGLE_WIDGETS":
             window.openWidgetVisibility();
             return true;
-        case "AI_COMMAND_CENTER":
-            if (!window.isAiIntegrationEnabled()) return false;
-            window.openAICommandCenter();
-            return true;
         case "FUZZY_SEARCH":
             window.activeFuzzyFinder = new FuzzyFinder();
             return true;
@@ -2613,8 +3041,6 @@ globalShortcut.unregisterAll();
 window.registerKeyboardShortcuts = () => {
     window.shortcuts.forEach(cut => {
         if (!cut.enabled) return;
-        if (cut.action === "AI_COMMAND_CENTER" && !window.isAiIntegrationEnabled()) return;
-
         if (cut.type === "app") {
             if (cut.action === "TAB_X") {
                 for (let i = 1; i <= 5; i++) {

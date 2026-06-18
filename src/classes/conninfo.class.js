@@ -24,7 +24,7 @@ class Conninfo {
 
         // Set chart options
         let chartOptions = [{
-            limitFPS: 40,
+            limitFPS: window.performanceTiming ? window.performanceTiming().networkChartFPS : 12,
             responsive: true,
             millisPerPixel: 70,
             interpolation: 'linear',
@@ -52,26 +52,52 @@ class Conninfo {
         this.charts[0].addTimeSeries(this.series[0], {lineWidth:1.7,strokeStyle:`rgb(${window.theme.r},${window.theme.g},${window.theme.b})`});
         this.charts[1].addTimeSeries(this.series[1], {lineWidth:1.7,strokeStyle:`rgb(${window.theme.r},${window.theme.g},${window.theme.b})`});
 
+        // Init updater
+        this.running = false;
+        this.currentlyUpdating = false;
+        if (!window.shouldStartWidgetInitially || window.shouldStartWidgetInitially("networkTraffic")) this.start();
+    }
+    start() {
+        if (this.running) return false;
+        this.running = true;
         this.charts[0].streamTo(document.getElementById("mod_conninfo_canvas_top"), 1000);
         this.charts[1].streamTo(document.getElementById("mod_conninfo_canvas_bottom"), 1000);
-
-        // Init updater
         this.updateInfo();
         this.infoUpdater = setInterval(() => {
             this.updateInfo();
-        }, 1000);
+        }, window.performanceTiming ? window.performanceTiming().networkTrafficInterval : 2000);
+        return true;
+    }
+    stop() {
+        if (this.infoUpdater) clearInterval(this.infoUpdater);
+        this.infoUpdater = null;
+        this.running = false;
+        this.charts.forEach(chart => {
+            if (chart && typeof chart.stop === "function") chart.stop();
+        });
+        return true;
+    }
+    refresh() {
+        this.updateInfo();
     }
     updateInfo() {
+        if (!this.running || this.currentlyUpdating) return;
         let time = new Date().getTime();
 
-        if (window.mods.netstat.offline || window.mods.netstat.iface === null) {
+        if (!window.mods.netstat || window.mods.netstat.offline || window.mods.netstat.iface === null) {
             this.series[0].append(time, 0);
             this.series[1].append(time, 0);
             document.querySelector("div#mod_conninfo").setAttribute("class", "offline");
             return;
         } else {
+            this.currentlyUpdating = true;
             document.querySelector("div#mod_conninfo").setAttribute("class", "");
             window.si.networkStats(window.mods.netstat.iface).then(data => {
+                if (!this.running) {
+                    this.currentlyUpdating = false;
+                    return;
+                }
+                data = data && data[0] ? data : [{tx_sec: 0, rx_sec: 0, tx_bytes: 0, rx_bytes: 0}];
 
                 let max0 = this.series[0].maxValue;
                 let max1 = -this.series[1].minValue;
@@ -86,6 +112,9 @@ class Conninfo {
 
                 this.total.innerText = `${this._pb(data[0].tx_bytes)} OUT, ${this._pb(data[0].rx_bytes)} IN`.toUpperCase();
                 this.current.innerText = "UP " + parseFloat(data[0].tx_sec/125000).toFixed(2) + " DOWN " + parseFloat(data[0].rx_sec/125000).toFixed(2);
+                this.currentlyUpdating = false;
+            }).catch(() => {
+                this.currentlyUpdating = false;
             });
         }
     }

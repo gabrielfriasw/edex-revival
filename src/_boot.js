@@ -77,6 +77,23 @@ const defaultSettings = {
     terminal: {
         showStartupBanner: true
     },
+    performance: {
+        profile: "cinematic",
+        systemInfoWorkers: 2,
+        maxSystemInfoWorkers: 2,
+        systemInfoWorkerIdleMs: 30000,
+        systemInfoWorkerScaleDelayMs: 750,
+        pauseHiddenWidgets: false,
+        pauseWhenWindowBlurred: false,
+        enableGlobeByDefault: true,
+        enableTerminalWebGL: true,
+        enableTerminalLigatures: true,
+        enableFeedbackAudio: true,
+        enableCinematicAudio: true,
+        lazyAudio: false,
+        disableBackgroundThrottling: true,
+        enableErrorLens: "ai-only"
+    },
     terminalStyle: {
         foreground: "",
         background: ""
@@ -327,7 +344,6 @@ if (!fs.existsSync(shortcutsFile)) {
         { type: "app", trigger: "Ctrl+Shift+S", action: "SETTINGS", enabled: true },
         { type: "app", trigger: "Ctrl+Shift+K", action: "SHORTCUTS", enabled: true },
         { type: "app", trigger: "Ctrl+Shift+W", action: "TOGGLE_WIDGETS", enabled: true },
-        { type: "app", trigger: "Ctrl+Shift+A", action: "AI_COMMAND_CENTER", enabled: false },
         { type: "app", trigger: "Ctrl+Shift+F", action: "FUZZY_SEARCH", enabled: true },
         { type: "app", trigger: "Ctrl+Shift+L", action: "FS_LIST_VIEW", enabled: true },
         { type: "app", trigger: "Ctrl+Shift+H", action: "FS_DOTFILES", enabled: true },
@@ -416,7 +432,7 @@ function createWindow(settings) {
             preload: path.join(__dirname, "preload.js"),
             sandbox: false,
             contextIsolation: true,
-            backgroundThrottling: false,
+            backgroundThrottling: !(settings.performance && settings.performance.disableBackgroundThrottling === true),
             webSecurity: true,
             nodeIntegration: false,
             nodeIntegrationInSubFrames: false,
@@ -556,9 +572,14 @@ app.on('ready', async () => {
         signale.watch("Waiting for frontend connection...");
     };
 
-    // Support for multithreaded systeminformation calls
-    signale.pending("Starting multithreaded calls controller...");
-    require("./_multithread.js");
+    // Support for lazy, cached systeminformation calls
+    signale.pending("Starting lazy systeminformation scheduler...");
+    require("./_multithread.js").init({
+        ipc,
+        settings,
+        isTrustedSender,
+        signale
+    });
 
     createWindow(settings);
 

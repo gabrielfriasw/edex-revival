@@ -254,7 +254,7 @@ function openPath(file) {
 function devfsWatch(target, callback) {
     if (typeof callback !== "function") throw new Error("devfs.watch requires a callback");
     return ipcRenderer.invoke("edex:devfs-watch-start", target).then(result => {
-        if (!result || !result.id) throw new Error("Unable to start watcher");
+        if (!result || result.error || !result.id) throw new Error(result && result.error || "Unable to start watcher");
         const channel = `edex:devfs-watch-event:${result.id}`;
         const listener = (event, payload) => callback(payload);
         ipcRenderer.on(channel, listener);

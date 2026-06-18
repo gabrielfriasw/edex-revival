@@ -12,11 +12,27 @@ class Clock {
         </div>`;
 
         this.lastTime = new Date();
+        this.running = false;
 
+        if (!window.shouldStartWidgetInitially || window.shouldStartWidgetInitially("clock")) this.start();
+    }
+    start() {
+        if (this.running) return false;
+        this.running = true;
         this.updateClock();
         this.updater = setInterval(() => {
             this.updateClock();
         }, 1000);
+        return true;
+    }
+    stop() {
+        if (this.updater) clearInterval(this.updater);
+        this.updater = null;
+        this.running = false;
+        return true;
+    }
+    refresh() {
+        this.updateClock();
     }
     updateClock() {
         let time = new Date();
@@ -41,7 +57,6 @@ class Clock {
             if (e === ":") clockString += "<em>"+e+"</em>";
             else clockString += "<span>"+e+"</span>";
         });
-        
         if (this.twelveHours) clockString += `<span>${this.ampm}</span>`;
 
         document.getElementById("mod_clock_text").innerHTML = clockString;

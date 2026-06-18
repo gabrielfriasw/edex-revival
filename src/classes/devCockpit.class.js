@@ -71,7 +71,6 @@ class DevCockpit {
         this.lastLocalDiagnostics = null;
 
         window.onTerminalErrorLensEvent = (terminal, event) => this.onTerminalErrorLensEvent(terminal, event);
-        window.openAICommandCenter = () => this.openAICommandCenter();
         window.openErrorToFixFlow = () => this.openErrorToFixFlow();
         window.openTerminalDiagnostics = number => this.openTerminalDiagnostics(number);
         window.openContextPackManager = () => this.openContextPackManager();
@@ -86,15 +85,6 @@ class DevCockpit {
         window.devCockpitOpenRef = index => this.openDiagnosticRef(index);
         window.spawnShellTab = options => this.spawnShellTab(options || {});
 
-        document.addEventListener("keydown", event => {
-            if (event.ctrlKey && event.shiftKey && event.code === "KeyA") {
-                if (!this.isAiEnabled()) return;
-                event.preventDefault();
-                event.stopPropagation();
-                this.openAICommandCenter();
-            }
-        }, true);
-
         setInterval(() => this.refreshDiagnosticBadges(), 2000);
     }
 
@@ -103,7 +93,7 @@ class DevCockpit {
     }
 
     isAiEnabled() {
-        return !!(window.settings && window.settings.ai && window.settings.ai.enabled !== false);
+        return !!(window.settings && window.settings.ai && window.settings.ai.enabled === true);
     }
 
     currentCwd() {
@@ -186,6 +176,7 @@ class DevCockpit {
     }
 
     openTerminalDiagnostics(number) {
+        window.terminalDiagnosticsActiveUntil = Date.now() + 300000;
         const diagnostic = this.activeDiagnostic(number);
         if (!diagnostic) {
             new Modal({type: "info", title: "Diagnostics", message: "No terminal diagnostics are available."});
@@ -241,47 +232,21 @@ class DevCockpit {
         }
     }
 
-    async openAICommandCenter() {
-        if (!this.isAiEnabled()) return false;
-        this.aiTools = await edex.ai.detectTools();
-        const tools = this.aiTools || {};
-        const providers = tools.providers || {};
-        const codex = providers.codex || {};
-        const claude = providers.claude || {};
-        const providerOptions = ["auto", "codex", "claude"].map(provider => {
-            const selected = (tools.preferred || "auto") === provider ? "selected" : "";
-            return `<option ${selected}>${provider}</option>`;
-        }).join("");
-
-        new Modal({
-            type: "custom",
-            title: "AI Command Center",
-            html: `<div class="dev_modal ai_center">
-                    <div class="ai_status_grid">
-                        <div><strong>Codex</strong><span>${codex.available ? this.escape(codex.path) : "not found"}</span></div>
-                        <div><strong>Claude</strong><span>${claude.available ? this.escape(claude.path) : "not found"}</span></div>
-                        <div><strong>Provider</strong><select id="ai_provider">${providerOptions}</select></div>
-                    </div>
-                    <div class="ai_action_grid">
-                        <button onclick="window.devCockpitAction('explain-last-error')">Explain last error</button>
-                        <button onclick="window.devCockpitAction('review-git-diff')">Review git diff</button>
-                        <button onclick="window.devCockpitAction('commit-message')">Generate commit message</button>
-                        <button onclick="window.devCockpitAction('write-tests')">Write tests for changed files</button>
-                        <button onclick="window.devCockpitAction('ask-selected-file')">Ask selected file</button>
-                        <button onclick="window.devCockpitAction('summarize-folder')">Summarize folder</button>
-                        <button onclick="window.devCockpitAction('open-codex')">Open Codex tab</button>
-                        <button onclick="window.devCockpitAction('open-claude')">Open Claude tab</button>
-                        <button onclick="window.openContextPackManager()">Context</button>
-                    </div>
-                </div>`
-        }, () => {
-            if (window.keyboard) window.keyboard.attach();
-        });
+    aiProviderSetting() {
+        const ai = window.settings && window.settings.ai || {};
+        return ai.provider || ai.defaultProvider || "auto";
     }
 
+    async resolveAiProvider(provider) {
+        const selected = provider && provider !== "auto" ? provider : (this.selectedProvider() || this.aiProviderSetting());
+        if (["codex", "claude"].includes(selected)) return selected;
+        const tools = this.aiTools || await edex.ai.detectTools();
+        this.aiTools = tools;
+        return tools && tools.preferred || "codex";
+    }
     selectedProvider() {
         const el = document.getElementById("ai_provider");
-        return el ? el.value : "auto";
+        return el ? el.value : this.aiProviderSetting();
     }
 
     async handleAction(action, arg) {
@@ -300,20 +265,6 @@ class DevCockpit {
                 return true;
             case "explain-last-error":
                 return this.openErrorToFixFlow();
-            case "review-git-diff":
-                return this.reviewGitDiff();
-            case "commit-message":
-                return this.generateCommitMessage();
-            case "write-tests":
-                return this.writeTestsForChangedFiles();
-            case "ask-selected-file":
-                return this.askSelectedFile();
-            case "summarize-folder":
-                return this.summarizeCurrentFolder();
-            case "open-codex":
-                return this.openProviderTab("codex");
-            case "open-claude":
-                return this.openProviderTab("claude");
             case "context-create":
                 return this.createContextPack(arg);
             default:
@@ -323,9 +274,10 @@ class DevCockpit {
 
     async runAiPrompt(provider, prompt, label) {
         if (!this.isAiEnabled()) return false;
-        const result = await edex.ai.runPromptInTab(provider || this.selectedProvider(), prompt);
+        const selected = await this.resolveAiProvider(provider || this.selectedProvider());
+        const result = await edex.ai.runPromptInTab(selected, prompt);
         if (!result || !result.command) {
-            new Modal({type: "warning", title: "AI Command Center", message: "No AI command could be prepared."});
+            new Modal({type: "warning", title: "Error to Fix", message: "No AI command could be prepared."});
             return false;
         }
         this.spawnShellTab({initialCommand: result.command, label: label || result.provider});
@@ -335,7 +287,7 @@ class DevCockpit {
     async explainLastError() {
         const diagnostic = this.activeDiagnostic();
         if (!diagnostic || !diagnostic.latest) {
-            new Modal({type: "info", title: "AI Command Center", message: "No terminal error has been captured yet."});
+            new Modal({type: "info", title: "Error to Fix", message: "No terminal error has been captured yet."});
             return false;
         }
         const prompt = [
@@ -421,7 +373,7 @@ class DevCockpit {
                     <button type="button" data-action="copy">Copy Prompt</button>
                     <button type="button" data-action="clear">Clear Diagnostic</button>
                 </div>
-                <div class="dev_error_fix_status">Edit the prompt if needed, then send it to the local CLI provider.</div>
+                <div class="dev_error_fix_status">Edit the prompt if needed, then send it to the selected local provider.</div>
             </div>`;
         const textarea = body.querySelector("#dev_error_fix_prompt");
         const status = body.querySelector(".dev_error_fix_status");
@@ -440,92 +392,6 @@ class DevCockpit {
             this.handleAction("clear-diagnostics");
             status.textContent = "Current terminal diagnostics cleared.";
         });
-    }
-
-    async reviewGitDiff() {
-        const cwd = this.currentCwd();
-        const diff = await edex.git.diff(cwd);
-        if (!diff || !diff.diff) {
-            new Modal({type: "info", title: "AI Command Center", message: "No git diff is available for the current directory."});
-            return false;
-        }
-        return this.runAiPrompt(this.selectedProvider(), [
-            "Review this git diff. Focus on bugs, regressions, missing tests, and security issues.",
-            `Repository path: ${cwd}`,
-            "",
-            diff.diff
-        ].join("\n"), "Review diff");
-    }
-
-    async generateCommitMessage() {
-        const cwd = this.currentCwd();
-        const diff = await edex.git.diff(cwd);
-        if (!diff || !diff.diff) {
-            new Modal({type: "info", title: "AI Command Center", message: "No git diff is available for the current directory."});
-            return false;
-        }
-        return this.runAiPrompt(this.selectedProvider(), [
-            "Write a concise conventional commit message for this diff.",
-            "Return only the commit message and a short body if needed.",
-            "",
-            diff.diff
-        ].join("\n"), "Commit message");
-    }
-
-    async writeTestsForChangedFiles() {
-        const cwd = this.currentCwd();
-        const status = await edex.git.status(cwd);
-        if (!status || !status.files || status.files.length === 0) {
-            new Modal({type: "info", title: "AI Command Center", message: "No changed files were detected."});
-            return false;
-        }
-        const files = status.files.map(file => file.path).join("\n");
-        const diff = await edex.git.diff(cwd);
-        return this.runAiPrompt(this.selectedProvider(), [
-            "Suggest or write focused tests for the changed files below.",
-            "Prefer the repository's existing test patterns and include exact filenames.",
-            "",
-            files,
-            "",
-            diff && diff.diff ? diff.diff : ""
-        ].join("\n"), "Write tests");
-    }
-
-    async askSelectedFile() {
-        const item = window.fsDisp && window.fsDisp.selected;
-        if (!item || item.type !== "file") {
-            new Modal({type: "info", title: "AI Command Center", message: "Select a file in the explorer first."});
-            return false;
-        }
-        const preview = await edex.devfs.preview(item.path, window.settings.ai && Number(window.settings.ai.contextBytes) || 60000).catch(() => null);
-        return this.runAiPrompt(this.selectedProvider(), [
-            "Explain this file and suggest useful next actions.",
-            `Path: ${item.path}`,
-            "",
-            preview && preview.content ? preview.content : "[No text preview available]"
-        ].join("\n"), "Ask file");
-    }
-
-    async summarizeCurrentFolder() {
-        const cwd = this.currentCwd();
-        const scan = await edex.contextPack.scanRepo(cwd);
-        return this.runAiPrompt(this.selectedProvider(), [
-            "Summarize this project/folder for a developer.",
-            "Include purpose, likely commands, important folders, and risks.",
-            "",
-            JSON.stringify(scan, null, 2)
-        ].join("\n"), "Summarize folder");
-    }
-
-    async openProviderTab(provider) {
-        const tools = this.aiTools || await edex.ai.detectTools();
-        const info = tools && tools.providers && tools.providers[provider];
-        if (!info || !info.command) {
-            new Modal({type: "warning", title: "AI Command Center", message: `${provider} command is not configured.`});
-            return false;
-        }
-        this.spawnShellTab({initialCommand: info.command, label: provider});
-        return true;
     }
 
     spawnShellTab(options) {
@@ -648,6 +514,7 @@ class DevCockpit {
             <div class="dev_diag_snapshot"><div class="devfs_empty">Collecting diagnostics...</div></div>`;
 
         const snapshot = await edex.diagnostics.snapshot().catch(error => ({error: error.message, checks: []}));
+        snapshot.rendererPerformance = window.collectWidgetRuntimeDiagnostics ? window.collectWidgetRuntimeDiagnostics() : {};
         this.lastLocalDiagnostics = snapshot;
         const target = body.querySelector(".dev_diag_snapshot");
         if (!target) return;
@@ -663,6 +530,15 @@ class DevCockpit {
                 <strong>${this.escape(check.title || check.id)}</strong>
                 <em>${this.escape(check.detail || "")}</em>
             </div>`).join("");
+
+        const systemInfo = snapshot.performance && snapshot.performance.systemInformation || {};
+        const processMetrics = snapshot.performance && snapshot.performance.appMetrics || [];
+        const processRows = processMetrics.length ? processMetrics.map(metric => `
+            <div class="dev_diag_check ok">
+                <span>${this.escape(metric.type || "process")}</span>
+                <strong>PID ${this.escape(metric.pid)}</strong>
+                <em>CPU ${this.escape(metric.cpu && metric.cpu.percentCPUUsage != null ? metric.cpu.percentCPUUsage : 0)}% / RAM ${edex.formatBytes((metric.memory && metric.memory.workingSetSize || 0) * 1024)}</em>
+            </div>`).join("") : `<div class="devfs_empty">Process metrics unavailable.</div>`;
 
         target.innerHTML = `
             <div class="dev_diag_summary">
@@ -692,12 +568,25 @@ class DevCockpit {
                         keyboard: snapshot.settings.keyboard,
                         shell: snapshot.settings.shell,
                         explorer: snapshot.settings.devExplorerEnabled ? "enabled" : "disabled",
-                        widgets: snapshot.settings.widgetsVisible ? "visible" : "hidden",
-                        ai: snapshot.settings.aiEnabled ? "enabled" : "disabled"
+                        widgets: snapshot.settings.widgetsVisible ? "visible" : "hidden"
+                    })}
+                </div>
+                <div>
+                    <h4>Performance</h4>
+                    ${this.renderKeyValues({
+                        profile: snapshot.settings.performance && snapshot.settings.performance.profile || "balanced",
+                        workers: `${systemInfo.activeWorkers || 0} active / ${systemInfo.busyWorkers || 0} busy`,
+                        queue: `${systemInfo.pendingQueue || 0} queued / ${systemInfo.inFlight || 0} in flight`,
+                        cache: `${systemInfo.cacheEntries || 0} entries`,
+                        widgetsPaused: snapshot.rendererPerformance && snapshot.rendererPerformance.pausedByWindowState ? "yes" : "no"
                     })}
                 </div>
             </div>
             <div class="dev_diag_checks">${checks}</div>
+            <div class="dev_diag_checks">
+                <h4>Processes</h4>
+                ${processRows}
+            </div>
             <div class="dev_diag_paths">
                 <h4>Paths</h4>
                 ${Object.keys(snapshot.pathReports || {}).map(key => {
@@ -2313,7 +2202,6 @@ class DevEditor {
                 </div>
                 <button type="button" data-action="insert-path">Insert path</button>
                 <span class="dev_editor_state">clean</span>
-                ${window.devCockpit && window.devCockpit.isAiEnabled() ? "<button type=\"button\" data-action=\"ask-ai\">Ask AI</button>" : ""}
             </div>
             <div class="dev_editor_palette hidden">
                 <input type="search" data-role="command-palette" spellcheck="false" placeholder="Type a command">
@@ -2795,14 +2683,6 @@ class DevEditor {
                 return state.path ? this.revealInExplorer(state.path) : false;
             case "toggle-sidebar":
                 return this.toggleSidebar();
-            case "ask-ai":
-                if (window.devCockpit) return window.devCockpit.runAiPrompt("auto", [
-                    "Review or explain this file.",
-                    `Path: ${state.path || state.name}`,
-                    "",
-                    this.getValue(state).slice(0, window.settings.ai && Number(window.settings.ai.contextBytes) || 60000)
-                ].join("\n"), "Ask editor");
-                return false;
             default:
                 return false;
         }
@@ -3479,8 +3359,7 @@ class ExplorerPreview {
 
         const token = ++this.token;
         this.browser.renderer.setPreview(`<div class="devfs_empty">Loading preview...</div>`);
-        const bytes = window.settings.ai && Number(window.settings.ai.contextBytes) || 60000;
-        const preview = await edex.devfs.preview(item.path, bytes).catch(error => ({kind: "error", content: error.message}));
+        const preview = await edex.devfs.preview(item.path, 60000).catch(error => ({kind: "error", content: error.message}));
         if (token !== this.token || !this.browser.store.selected || this.browser.store.selected.path !== item.path) return;
         this.browser.renderer.setPreview(this.renderPreview(preview));
     }
@@ -3661,7 +3540,6 @@ class ExplorerCommands {
             case "diagnostics": return window.openDevDiagnostics();
             case "theme-editor": return window.openDevThemeEditor();
             case "layout-editor": return window.openDevLayoutEditor();
-            case "ask-selected-file": return window.devCockpit && window.devCockpit.handleAction("ask-selected-file");
             case "toggle-hidden": return this.browser.toggleHidedotfiles();
             case "toggle-extensions": return this.browser.toggleExtensions();
             case "toggle-preview": return this.browser.togglePreview();
@@ -3742,13 +3620,7 @@ class ExplorerRenderer {
         return `<button type="button" class="devfs_icon_button ${extraClass}" ${attrs} title="${this.escape(label)}">${this.browser.buttonMarkup(icon, label)}</button>`;
     }
 
-    renderCommandButton(meta) {
-        return this.renderIconButton(`data-command="${this.escape(meta.command)}"`, meta.icon, meta.label, "devfs_command_button");
-    }
-
     renderShell() {
-        const buttons = this.browser.commands.commandButtons.map(meta => this.renderCommandButton(meta)).join("");
-
         this.container.innerHTML = `
             <h3 class="title"><p>FILES</p><p id="fs_disp_title_dir"></p></h3>
             <div class="devfs_window_bar">
@@ -3771,7 +3643,6 @@ class ExplorerRenderer {
                     <input id="devfs_omnibar" type="search" spellcheck="false" placeholder="path / search / >command">
                 </div>
                 <div id="devfs_tabs"></div>
-                <div class="devfs_commandbar">${buttons}</div>
                 <div class="devfs_layout">
                     <aside id="devfs_nav"></aside>
                     <main class="devfs_main">
@@ -3839,9 +3710,6 @@ class ExplorerRenderer {
         this.container.querySelector("#devfs_type_filter").addEventListener("change", event => {
             this.browser.store.filterType = event.target.value;
             this.browser.render();
-        });
-        this.container.querySelectorAll(".devfs_commandbar button[data-command]").forEach(button => {
-            button.addEventListener("click", () => this.browser.commands.run(button.dataset.command));
         });
         this.container.querySelector("#devfs_view_modes").addEventListener("click", event => {
             const button = event.target.closest("button[data-view]");
@@ -4211,15 +4079,16 @@ class ExplorerRenderer {
 
     renderItem(item, index, pane) {
         const store = this.browser.store;
-        const name = store.displayName(item);
+        const name = this.browser.itemDisplayName(item);
         const git = item.git ? `<span class="devfs_git_badge">${this.escape(item.git)}</span>` : "";
         const size = typeof item.size === "number" ? edex.formatBytes(item.size) : "--";
         const mtime = item.mtime ? new Date(item.mtime).toLocaleString() : "--";
+        const kind = this.browser.kindLabel(item);
         return `
-            <div class="${this.itemClasses(item)}" draggable="true" data-index="${index}" ${pane ? `data-pane="${pane}"` : ""} data-path="${this.escape(item.path)}" title="${this.escape(item.path)} - double click to open">
+            <div class="${this.itemClasses(item)}" draggable="true" data-index="${index}" ${pane ? `data-pane="${pane}"` : ""} data-path="${this.escape(item.path)}" data-name="${this.escape(name)}" title="${this.escape(name)} - ${this.escape(kind)} - ${this.escape(item.path)}">
                 <span class="devfs_icon">${this.browser.svgIcon(this.browser.itemIconName(item))}</span>
-                <span class="devfs_name">${this.escape(name)}</span>
-                <span class="devfs_kind">${this.escape(this.browser.kindLabel(item))}${git}</span>
+                <span class="devfs_name" data-name="${this.escape(name)}">${this.escape(name)}</span>
+                <span class="devfs_kind" aria-hidden="true">${git}</span>
                 <span class="devfs_size">${this.escape(size)}</span>
                 <span class="devfs_time">${this.escape(mtime)}</span>
             </div>`;
@@ -4230,7 +4099,7 @@ class ExplorerRenderer {
         const items = store.filteredItems();
         this.currentItems = items;
         this.container.querySelector("#devfs_headers").innerHTML = store.view === "list"
-            ? `<span></span><span>Name</span><span>Kind</span><span>Size</span><span>Modified</span>`
+            ? `<span></span><span>Name</span><span></span><span>Size</span><span>Modified</span>`
             : "";
 
         if (store.view === "columns") return this.renderColumns(items);
@@ -4434,13 +4303,14 @@ class ExplorerRenderer {
         const hash = store.hashes[item.path] ? `<div class="devfs_extra"><h5>Hashes</h5><pre>${this.escape(JSON.stringify(store.hashes[item.path], null, 2))}</pre></div>` : "";
         const diff = store.diffs[item.path] ? `<div class="devfs_extra"><h5>Diff</h5><pre>${this.escape(store.diffs[item.path].diff || "No diff")}</pre></div>` : "";
         const previewSlot = store.showPreview ? `<div id="devfs_preview"><div class="devfs_empty">Preview ready</div></div>` : `<div id="devfs_preview" class="disabled"><div class="devfs_empty">Preview hidden</div></div>`;
+        const name = this.browser.itemDisplayName(item);
         const action = (command, disabled = false, label) => {
             const meta = this.browser.actionMeta(command);
             return `<button type="button" data-action="${this.escape(command)}" ${disabled ? "disabled" : ""} title="${this.escape(label || meta.label)}">${this.browser.buttonMarkup(meta.icon, label || meta.label)}</button>`;
         };
 
         this.inspector.innerHTML = `
-            <h4 title="${this.escape(item.name)}"><span class="devfs_inspector_icon">${this.browser.svgIcon(this.browser.itemIconName(item))}</span>${this.escape(item.name)}</h4>
+            <h4 title="${this.escape(name)}"><span class="devfs_inspector_icon">${this.browser.svgIcon(this.browser.itemIconName(item))}</span>${this.escape(name)}</h4>
             <p title="${this.escape(item.path)}">${this.escape(item.path)}</p>
             <div class="devfs_meta">
                 <span>${this.escape(this.browser.kindLabel(item))}</span>
@@ -4462,7 +4332,6 @@ class ExplorerRenderer {
                 ${action("trash")}
                 ${action("hash", item.type !== "file")}
                 ${action("diff", !item.git)}
-                ${window.devCockpit && window.devCockpit.isAiEnabled() ? action("ask-selected-file", item.type !== "file") : ""}
             </div>
             ${previewSlot}
             ${hash}
@@ -4528,6 +4397,17 @@ class DevFileBrowser {
         return window._escapeHtml(String(value == null ? "" : value));
     }
 
+    itemDisplayName(item) {
+        if (!item) return "";
+        const rawName = item.name || (item.path ? this.path.basename(item.path) : "");
+        if (!rawName) return "Untitled";
+        if (this.store.showExtensions === false && item.type === "file") {
+            const ext = this.path.extname(rawName);
+            return ext ? rawName.slice(0, -ext.length) : rawName;
+        }
+        return rawName;
+    }
+
     svgIcon(name) {
         const path = DEVFS_ICON_PATHS[name] || DEVFS_ICON_PATHS.file;
         return `<svg class="devfs_svg_icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${path}</svg>`;
@@ -4545,7 +4425,6 @@ class DevFileBrowser {
             "terminal-here": {label: "Terminal", icon: "terminal"},
             "copy-path": {label: "Copy path", icon: "path"},
             "copy-wsl": {label: "Copy WSL", icon: "wsl"},
-            "ask-selected-file": {label: "Ask AI", icon: "context"},
             "hash": {label: "Hash", icon: "extensions"},
             "diff": {label: "Diff", icon: "git"},
             "context": {label: "Context", icon: "context"}
@@ -4687,9 +4566,14 @@ class DevFileBrowser {
             await this.watchHandle.close().catch(() => {});
             this.watchHandle = null;
         }
-        this.watchHandle = await edex.devfs.watch(dir, () => {
+        this.watchHandle = await edex.devfs.watch(dir, payload => {
+            if (payload && payload.type === "error") {
+                this.setStatus(payload.error || "Directory watcher unavailable");
+                return;
+            }
             clearTimeout(this.watchTimer);
-            this.watchTimer = setTimeout(() => this.readFS(this.dirpath, {history: false}), 350);
+            const delay = window.performanceTiming ? window.performanceTiming().filesystemWatcherDebounce : 1000;
+            this.watchTimer = setTimeout(() => this.readFS(this.dirpath, {history: false}), delay);
         }).catch(() => null);
     }
 
@@ -5151,7 +5035,7 @@ class DevFileBrowser {
         }
         const name = window.prompt("New name", item.name);
         if (!name || name === item.name) return false;
-        return this.operation(`rename ${item.name}`, () => edex.devfs.rename(item.path, name));
+        return this.operation(`rename ${this.itemDisplayName(item)}`, () => edex.devfs.rename(item.path, name));
     }
 
     duplicateSelected() {
@@ -5165,7 +5049,7 @@ class DevFileBrowser {
         const item = selected[0];
         const target = window.prompt("Duplicate to", "");
         if (target === null) return false;
-        return this.operation(`duplicate ${item.name}`, () => edex.devfs.duplicate(item.path, target || undefined));
+        return this.operation(`duplicate ${this.itemDisplayName(item)}`, () => edex.devfs.duplicate(item.path, target || undefined));
     }
 
     copySelected() {
@@ -5181,7 +5065,7 @@ class DevFileBrowser {
         const item = selected[0];
         const target = window.prompt("Copy to", this.path.join(this.dirpath, item.name));
         if (!target || target === item.path) return false;
-        return this.operation(`copy ${item.name}`, () => edex.devfs.copy(item.path, target));
+        return this.operation(`copy ${this.itemDisplayName(item)}`, () => edex.devfs.copy(item.path, target));
     }
 
     moveSelected() {
@@ -5197,17 +5081,17 @@ class DevFileBrowser {
         const item = selected[0];
         const target = window.prompt("Move to", item.path);
         if (!target || target === item.path) return false;
-        return this.operation(`move ${item.name}`, () => edex.devfs.move(item.path, target));
+        return this.operation(`move ${this.itemDisplayName(item)}`, () => edex.devfs.move(item.path, target));
     }
 
     trashSelected() {
         const selected = this.selectedOperationItems().filter(item => item.type !== "deleted");
         if (!selected.length) return false;
         if (this.store.settings.confirmTrash !== false) {
-            const message = selected.length > 1 ? `Move ${selected.length} items to trash?` : `Move ${selected[0].name} to trash?`;
+            const message = selected.length > 1 ? `Move ${selected.length} items to trash?` : `Move ${this.itemDisplayName(selected[0])} to trash?`;
             if (!window.confirm(message)) return false;
         }
-        return this.operation(`trash ${selected.length > 1 ? selected.length+" items" : selected[0].name}`, async () => {
+        return this.operation(`trash ${selected.length > 1 ? selected.length+" items" : this.itemDisplayName(selected[0])}`, async () => {
             for (const item of selected) await edex.devfs.trash(item.path);
             this.store.selectItem(null);
         });

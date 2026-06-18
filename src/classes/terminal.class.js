@@ -252,7 +252,7 @@ function createTerminalErrorLens(term) {
         buffer: "",
         events: [],
         hashes: new Set(),
-        maxBuffer: (window.settings.ai && Number(window.settings.ai.contextBytes)) || 60000,
+        maxBuffer: 60000,
         maxEvents: 40,
         onchange: () => {}
     };
@@ -470,6 +470,7 @@ class Terminal {
             let terminalStyle = window.settings.terminalStyle || {};
             let terminalForeground = String(terminalStyle.foreground || "").trim() || window.theme.terminal.foreground;
             let terminalBackground = String(terminalStyle.background || "").trim() || window.theme.terminal.background;
+            let performanceSettings = window.performanceSettings ? window.performanceSettings() : {};
 
             this.term = new this.xTerm({
                 cols: 80,
@@ -513,16 +514,20 @@ class Terminal {
             let fitAddon = new FitAddon();
             this.term.loadAddon(fitAddon);
             this.term.open(document.getElementById(opts.parentId));
-            try {
-                this.term.loadAddon(new WebglAddon());
-            } catch(e) {
-                console.warn("Could not initialize xterm WebGL renderer", e);
+            if (performanceSettings.enableTerminalWebGL !== false) {
+                try {
+                    this.term.loadAddon(new WebglAddon());
+                } catch(e) {
+                    console.warn("Could not initialize xterm WebGL renderer", e);
+                }
             }
-            import("../node_modules/@xterm/addon-ligatures/lib/addon-ligatures.mjs").then(({LigaturesAddon}) => {
-                this.term.loadAddon(new LigaturesAddon());
-            }).catch(e => {
-                console.warn("Could not initialize xterm ligatures addon", e);
-            });
+            if (performanceSettings.enableTerminalLigatures === true) {
+                import("../node_modules/@xterm/addon-ligatures/lib/addon-ligatures.mjs").then(({LigaturesAddon}) => {
+                    this.term.loadAddon(new LigaturesAddon());
+                }).catch(e => {
+                    console.warn("Could not initialize xterm ligatures addon", e);
+                });
+            }
             this.term.attachCustomKeyEventHandler(e => {
                 window.keyboard.keydownHandler(e);
                 return true;
@@ -574,28 +579,46 @@ class Terminal {
                 }
             };
 
+            this._terminalAnalysisBuffer = "";
+            this._terminalAnalysisTimer = null;
+            this.queueTerminalAnalysis = data => {
+                this._terminalAnalysisBuffer = (this._terminalAnalysisBuffer + String(data || "")).slice(-60000);
+                if (this._terminalAnalysisTimer) return;
+                const timing = window.performanceTiming ? window.performanceTiming() : {terminalAnalysisDebounce: 150};
+                this._terminalAnalysisTimer = setTimeout(() => {
+                    const chunk = this._terminalAnalysisBuffer;
+                    this._terminalAnalysisBuffer = "";
+                    this._terminalAnalysisTimer = null;
+
+                    if (window.shouldCaptureTerminalErrorLens && window.shouldCaptureTerminalErrorLens()) {
+                        this.errorLens.capture(chunk);
+                    }
+
+                    // See #397
+                    if (!window.settings.experimentalGlobeFeatures || !window.mods || !window.mods.globe) return;
+                    let ips = chunk.match(/((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)/g);
+                    if (ips !== null && ips.length >= 1) {
+                        ips = ips.filter((val, index, self) => { return self.indexOf(val) === index; });
+                        ips.forEach(ip => {
+                            window.mods.globe.addTemporaryConnectedMarker(ip);
+                        });
+                    }
+                }, timing.terminalAnalysisDebounce || 150);
+            };
+
             this.lastSoundFX = Date.now();
             this.socket.addEventListener("message", e => {
                 let d = Date.now();
-                this.errorLens.capture(e.data);
+                this.queueTerminalAnalysis(e.data);
 
                 if (d - this.lastSoundFX > 30) {
-                    if(window.passwordMode == "false")
+                    const perf = window.performanceSettings ? window.performanceSettings() : {};
+                    if(window.passwordMode == "false" && perf.enableFeedbackAudio === true)
                         window.audioManager.stdout.play();
                     this.lastSoundFX = d;
                 }
                 if (d - this.lastRefit > 10000) {
                     this.fit();
-                }
-
-                // See #397
-                if (!window.settings.experimentalGlobeFeatures) return;
-                let ips = e.data.match(/((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)/g);
-                if (ips !== null && ips.length >= 1) {
-                    ips = ips.filter((val, index, self) => { return self.indexOf(val) === index; });
-                    ips.forEach(ip => {
-                        window.mods.globe.addTemporaryConnectedMarker(ip);
-                    });
                 }
             });
 

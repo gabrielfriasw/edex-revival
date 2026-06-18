@@ -26,12 +26,8 @@ class Netstat {
         this.failedAttempts = {};
         this.runsBeforeGeoIPUpdate = 0;
         this.geoReady = false;
-
-        // Init updaters
-        this.updateInfo();
-        this.infoUpdater = setInterval(() => {
-            this.updateInfo();
-        }, 2000);
+        this.running = false;
+        this.currentlyUpdating = false;
 
         this.geoLookup = {
             get: () => null
@@ -58,13 +54,48 @@ class Netstat {
             };
             this.lastconn.finished = true;
         });
+        if (!window.shouldStartWidgetInitially || window.shouldStartWidgetInitially("networkStatus")) this.start();
+    }
+    start() {
+        if (this.running) return false;
+        this.running = true;
+        this.updateInfo();
+        this.infoUpdater = setInterval(() => {
+            this.updateInfo();
+        }, window.performanceTiming ? window.performanceTiming().networkStatusInterval : 2000);
+        return true;
+    }
+    stop() {
+        if (this.infoUpdater) clearInterval(this.infoUpdater);
+        this.infoUpdater = null;
+        this.running = false;
+        return true;
+    }
+    refresh() {
+        this.updateInfo();
     }
     updateInfo() {
+        if (!this.running || this.currentlyUpdating) return;
+        this.currentlyUpdating = true;
         window.si.networkInterfaces().then(async data => {
+            if (!this.running) {
+                this.currentlyUpdating = false;
+                return;
+            }
             let offline = false;
 
+            data = Array.isArray(data) ? data : [];
             let net = data[0];
             let netID = 0;
+            if (!net) {
+                this.iface = null;
+                document.getElementById("mod_netstat_iname").innerText = window.settings.widgets && window.settings.widgets.showInterface === false ? "Interface: hidden" : "Interface: (offline)";
+                this.offline = true;
+                document.querySelector("#mod_netstat_innercontainer > div:first-child > h2").innerHTML = "OFFLINE";
+                document.querySelector("#mod_netstat_innercontainer > div:nth-child(2) > h2").innerHTML = "--ms";
+                this.currentlyUpdating = false;
+                return false;
+            }
 
             const configuredIface = typeof window.settings.iface === "string" ? window.settings.iface : "auto";
             if (configuredIface && configuredIface !== "auto") {
@@ -75,6 +106,7 @@ class Netstat {
                     } else {
                         // No detected interface has the custom iface name, fallback to automatic detection on next loop
                         window.settings.iface = false;
+                        this.currentlyUpdating = false;
                         return false;
                     }
                 }
@@ -93,6 +125,7 @@ class Netstat {
                         this.offline = true;
                         document.querySelector("#mod_netstat_innercontainer > div:first-child > h2").innerHTML = "OFFLINE";
                         document.querySelector("#mod_netstat_innercontainer > div:nth-child(2) > h2").innerHTML = "--ms";
+                        this.currentlyUpdating = false;
                         return false;
                     }
                 }
@@ -145,6 +178,9 @@ class Netstat {
                     document.querySelector("#mod_netstat_innercontainer > div:nth-child(2) > h2").innerHTML = Math.round(p)+"ms";
                 }
             }
+            this.currentlyUpdating = false;
+        }).catch(() => {
+            this.currentlyUpdating = false;
         });
     }
     ping(target, port, local) {

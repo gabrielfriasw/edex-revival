@@ -69,6 +69,20 @@ function mergeDefaults(target, defaults) {
     return target;
 }
 
+function defaultAiSettings() {
+    return {
+        enabled: false,
+        provider: "auto",
+        defaultProvider: "auto",
+        contextBytes: DEFAULT_CONTEXT_BYTES,
+        redactSecrets: true,
+        commands: {
+            codex: "codex",
+            claude: "claude"
+        }
+    };
+}
+
 function defaultDevSettings() {
     return {
         layoutPreset: "classic",
@@ -79,16 +93,24 @@ function defaultDevSettings() {
             labels: true,
             autoHide: true
         },
-        ai: {
-            enabled: false,
-            defaultProvider: "auto",
-            contextBytes: DEFAULT_CONTEXT_BYTES,
-            redactSecrets: true,
-            commands: {
-                codex: "codex",
-                claude: "claude"
-            }
+        performance: {
+            profile: "cinematic",
+            systemInfoWorkers: 2,
+            maxSystemInfoWorkers: 2,
+            systemInfoWorkerIdleMs: 30000,
+            systemInfoWorkerScaleDelayMs: 750,
+            pauseHiddenWidgets: false,
+            pauseWhenWindowBlurred: false,
+            enableGlobeByDefault: true,
+            enableTerminalWebGL: true,
+            enableTerminalLigatures: true,
+            enableFeedbackAudio: true,
+            enableCinematicAudio: true,
+            lazyAudio: false,
+            disableBackgroundThrottling: true,
+            enableErrorLens: "ai-only"
         },
+        ai: defaultAiSettings(),
         ssh: {
             profiles: [],
             lastProfileId: ""
@@ -141,8 +163,72 @@ function defaultDevSettings() {
     };
 }
 
+function clampInteger(value, min, max, fallback) {
+    const number = Number(value);
+    if (!Number.isInteger(number)) return fallback;
+    return Math.max(min, Math.min(max, number));
+}
+
+function normalizeAiProvider(value) {
+    const provider = String(value || "").toLowerCase();
+    return ["auto", "codex", "claude"].includes(provider) ? provider : "auto";
+}
+
+function normalizeAiSettings(ai) {
+    const next = mergeDefaults(ai && typeof ai === "object" && !Array.isArray(ai) ? ai : {}, defaultAiSettings());
+    next.enabled = next.enabled === true;
+    next.provider = normalizeAiProvider(next.provider || next.defaultProvider || "auto");
+    next.defaultProvider = normalizeAiProvider(next.defaultProvider || next.provider);
+    if (next.defaultProvider === "auto" && next.provider !== "auto") next.defaultProvider = next.provider;
+    next.contextBytes = clampInteger(next.contextBytes, 1024, 1000000, DEFAULT_CONTEXT_BYTES);
+    next.redactSecrets = next.redactSecrets !== false;
+    next.commands = Object.assign({codex: "codex", claude: "claude"}, next.commands || {});
+    next.commands.codex = String(next.commands.codex || "codex").trim() || "codex";
+    next.commands.claude = String(next.commands.claude || "claude").trim() || "claude";
+    delete next.ollama;
+    return next;
+}
+
+function normalizePerformanceSettings(performance) {
+    const defaults = defaultDevSettings().performance;
+    const source = performance && typeof performance === "object" && !Array.isArray(performance) ? performance : {};
+    const next = mergeDefaults(source, defaults);
+    if (!["balanced", "max", "cinematic"].includes(next.profile)) next.profile = "balanced";
+    next.systemInfoWorkers = clampInteger(next.systemInfoWorkers, 1, 4, defaults.systemInfoWorkers);
+    next.maxSystemInfoWorkers = clampInteger(next.maxSystemInfoWorkers, next.systemInfoWorkers, 4, defaults.maxSystemInfoWorkers);
+    next.systemInfoWorkerIdleMs = clampInteger(next.systemInfoWorkerIdleMs, 5000, 300000, defaults.systemInfoWorkerIdleMs);
+    next.systemInfoWorkerScaleDelayMs = clampInteger(next.systemInfoWorkerScaleDelayMs, 100, 60000, defaults.systemInfoWorkerScaleDelayMs);
+    if (next.profile !== "cinematic") {
+        const minimumScaleDelayMs = next.profile === "max" ? 15000 : defaults.systemInfoWorkerScaleDelayMs;
+        next.systemInfoWorkerScaleDelayMs = Math.max(minimumScaleDelayMs, next.systemInfoWorkerScaleDelayMs);
+    }
+    next.pauseHiddenWidgets = next.pauseHiddenWidgets !== false;
+    next.pauseWhenWindowBlurred = next.pauseWhenWindowBlurred !== false;
+    next.enableGlobeByDefault = next.enableGlobeByDefault !== false;
+    next.enableTerminalWebGL = next.enableTerminalWebGL !== false;
+    next.enableTerminalLigatures = next.enableTerminalLigatures === true;
+    next.enableFeedbackAudio = next.enableFeedbackAudio === true;
+    next.enableCinematicAudio = next.profile === "cinematic"
+        ? next.enableCinematicAudio !== false
+        : next.enableCinematicAudio === true;
+    next.lazyAudio = next.lazyAudio === true;
+    next.disableBackgroundThrottling = next.disableBackgroundThrottling !== false;
+    if (!["off", "ai-only", "always"].includes(next.enableErrorLens)) next.enableErrorLens = "ai-only";
+    if (next.profile === "max") {
+        next.enableGlobeByDefault = false;
+        next.enableFeedbackAudio = false;
+        next.enableCinematicAudio = false;
+        next.lazyAudio = true;
+        next.disableBackgroundThrottling = false;
+    }
+    return next;
+}
+
 function normalizeSettings(settings) {
-    return mergeDefaults(settings || {}, defaultDevSettings());
+    const next = mergeDefaults(settings || {}, defaultDevSettings());
+    next.ai = normalizeAiSettings(next.ai);
+    next.performance = normalizePerformanceSettings(next.performance);
+    return next;
 }
 
 async function accessReport(target, type) {
@@ -216,6 +302,33 @@ function buildPipeCommand(command, promptFile) {
         return `Get-Content -Raw -LiteralPath ${quotePowerShell(promptFile)} | ${command}`;
     }
     return `cat ${quotePosix(promptFile)} | ${command}`;
+}
+
+function limitedUtf8(text, maxBytes) {
+    const source = String(text || "");
+    const bytes = Buffer.from(source, "utf-8");
+    if (bytes.length <= maxBytes) {
+        return {text: source, bytes: bytes.length, truncated: false};
+    }
+    const limited = bytes.subarray(0, maxBytes).toString("utf-8").replace(/\uFFFD$/g, "");
+    return {text: limited, bytes: Buffer.byteLength(limited, "utf-8"), truncated: true};
+}
+
+function prepareAiPrompt(settingsOrAi, prompt) {
+    const ai = settingsOrAi && typeof settingsOrAi === "object" && typeof settingsOrAi.enabled !== "undefined"
+        ? normalizeAiSettings(settingsOrAi)
+        : normalizeSettings(settingsOrAi || {}).ai;
+    if (ai.enabled !== true) {
+        throw new Error("AI integration is disabled");
+    }
+    const source = ai.redactSecrets === false ? stripControlText(prompt) : redactSecrets(prompt);
+    const limited = limitedUtf8(source, Number(ai.contextBytes) || DEFAULT_CONTEXT_BYTES);
+    return {
+        prompt: limited.text,
+        bytes: limited.bytes,
+        truncated: limited.truncated,
+        redacted: ai.redactSecrets !== false
+    };
 }
 
 async function detectCommand(command) {
@@ -1238,12 +1351,12 @@ function registerDevBackend({app, ipc, shell, getWindow, settingsFile, isTrusted
         const ai = normalizeSettings(settings).ai;
         const codex = await detectCommand(ai.commands && ai.commands.codex || "codex");
         const claude = await detectCommand(ai.commands && ai.commands.claude || "claude");
-        let preferred = ai.defaultProvider || "auto";
+        let preferred = normalizeAiProvider(ai.provider || ai.defaultProvider || "auto");
         if (preferred === "auto") {
-            preferred = codex.available ? "codex" : (claude.available ? "claude" : "custom");
+            preferred = codex.available ? "codex" : (claude.available ? "claude" : "codex");
         }
         return {
-            enabled: ai.enabled !== false,
+            enabled: ai.enabled === true,
             preferred,
             providers: {codex, claude},
             contextBytes: Number(ai.contextBytes) || DEFAULT_CONTEXT_BYTES,
@@ -1273,7 +1386,8 @@ function registerDevBackend({app, ipc, shell, getWindow, settingsFile, isTrusted
     }
 
     async function diagnosticsSnapshot() {
-        const settings = readSettings();
+        const settings = normalizeSettings(readSettings());
+        const aiTools = settings.ai && settings.ai.enabled === true ? await detectTools(settings).catch(() => null) : null;
         const win = getWindow();
         const appPath = app.getAppPath();
         const userData = app.getPath("userData");
@@ -1294,6 +1408,26 @@ function registerDevBackend({app, ipc, shell, getWindow, settingsFile, isTrusted
         const shellCheck = await detectCommand(settings.shell || "");
         const startup = getStartupStatus();
         const gpu = typeof app.getGPUFeatureStatus === "function" ? app.getGPUFeatureStatus() : {};
+        const appMetrics = typeof app.getAppMetrics === "function"
+            ? app.getAppMetrics().map(metric => ({
+                pid: metric.pid,
+                type: metric.type,
+                cpu: {
+                    percentCPUUsage: metric.cpu && metric.cpu.percentCPUUsage,
+                    idleWakeupsPerSecond: metric.cpu && metric.cpu.idleWakeupsPerSecond
+                },
+                memory: metric.memory ? {
+                    workingSetSize: metric.memory.workingSetSize,
+                    peakWorkingSetSize: metric.memory.peakWorkingSetSize,
+                    privateBytes: metric.memory.privateBytes,
+                    sharedBytes: metric.memory.sharedBytes
+                } : {}
+            }))
+            : [];
+        let systemInformation = {started: false};
+        try {
+            systemInformation = require("../_multithread.js").getMetrics();
+        } catch(e) {}
         const windowState = win && !win.isDestroyed() ? {
             available: true,
             size: win.getSize(),
@@ -1340,9 +1474,13 @@ function registerDevBackend({app, ipc, shell, getWindow, settingsFile, isTrusted
             },
             {
                 id: "ai",
-                title: "AI integration",
-                status: settings.ai && settings.ai.enabled !== false ? "warn" : "ok",
-                detail: settings.ai && settings.ai.enabled !== false ? "Enabled by settings" : "Disabled by settings"
+                title: "Error to Fix",
+                status: settings.ai && settings.ai.enabled === true
+                    ? (aiTools && aiTools.providers && ((aiTools.providers.codex && aiTools.providers.codex.available) || (aiTools.providers.claude && aiTools.providers.claude.available)) ? "ok" : "warn")
+                    : "ok",
+                detail: settings.ai && settings.ai.enabled === true
+                    ? `${settings.ai.provider || settings.ai.defaultProvider || "auto"} / Codex or Claude CLI`
+                    : "Disabled by settings"
             }
         ];
 
@@ -1374,9 +1512,15 @@ function registerDevBackend({app, ipc, shell, getWindow, settingsFile, isTrusted
                 shell: settings.shell,
                 shellArgs: settings.shellArgs || "",
                 launchOnStartup: settings.launchOnStartup === true,
-                aiEnabled: !!(settings.ai && settings.ai.enabled !== false),
+                aiEnabled: !!(settings.ai && settings.ai.enabled === true),
+                aiProvider: settings.ai && (settings.ai.provider || settings.ai.defaultProvider) || "auto",
                 devExplorerEnabled: !!(settings.devExplorer && settings.devExplorer.enabled !== false),
-                widgetsVisible: !(settings.widgets && settings.widgets.visible === false)
+                widgetsVisible: !(settings.widgets && settings.widgets.visible === false),
+                performance: settings.performance
+            },
+            performance: {
+                appMetrics,
+                systemInformation
             },
             startup,
             shell: shellCheck,
@@ -1397,12 +1541,13 @@ function registerDevBackend({app, ipc, shell, getWindow, settingsFile, isTrusted
         const settings = readSettings();
         const tools = await detectTools(settings);
         const ai = settings.ai || {};
+        if (ai.enabled !== true) throw new Error("AI integration is disabled");
         let selected = provider || tools.preferred || "codex";
         if (selected === "auto") selected = tools.preferred;
         if (!["codex", "claude"].includes(selected)) selected = tools.providers.codex.available ? "codex" : "claude";
 
         const providerCommand = ai.commands && ai.commands[selected] || selected;
-        const safePrompt = ai.redactSecrets === false ? stripControlText(prompt) : redactSecrets(prompt);
+        const safePrompt = prepareAiPrompt(normalizeSettings(settings).ai, prompt).prompt;
         await fsp.mkdir(promptDir, {recursive: true});
         const promptFile = path.join(promptDir, `${Date.now()}-${crypto.randomBytes(4).toString("hex")}-${selected}.txt`);
         await fsp.writeFile(promptFile, safePrompt.slice(0, Number(ai.contextBytes) || DEFAULT_CONTEXT_BYTES), "utf-8");
@@ -1592,10 +1737,16 @@ function registerDevBackend({app, ipc, shell, getWindow, settingsFile, isTrusted
     ipc.handle("edex:devfs-watch-start", async (event, dir) => {
         if (!trusted(event)) return null;
         const target = resolveLocalPath(dir);
+        try {
+            await fsp.realpath(target);
+        } catch(error) {
+            return {error: error.message || String(error)};
+        }
         const chokidar = await loadModule("chokidar");
         const id = crypto.randomBytes(8).toString("hex");
         const watcher = chokidar.watch(target, {
             ignoreInitial: true,
+            ignorePermissionErrors: true,
             depth: 1,
             awaitWriteFinish: {stabilityThreshold: 250, pollInterval: 100}
         });

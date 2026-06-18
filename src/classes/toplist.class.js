@@ -39,17 +39,37 @@ class Toplist {
         this.parent.append(this._element);
 
         this.currentlyUpdating = false;
+        this.running = false;
 
+        if (!window.shouldStartWidgetInitially || window.shouldStartWidgetInitially("processes")) this.start();
+    }
+    start() {
+        if (this.running) return false;
+        this.running = true;
         this.updateList();
         this.listUpdater = setInterval(() => {
             this.updateList();
-        }, 2000);
+        }, window.performanceTiming ? window.performanceTiming().toplistInterval : 5000);
+        return true;
+    }
+    stop() {
+        if (this.listUpdater) clearInterval(this.listUpdater);
+        this.listUpdater = null;
+        this.running = false;
+        return true;
+    }
+    refresh() {
+        this.updateList();
     }
     updateList() {
-        if (this.currentlyUpdating) return;
+        if (!this.running || this.currentlyUpdating) return;
 
         this.currentlyUpdating = true;
         window.si.processes().then(data => {
+            if (!this.running) {
+                this.currentlyUpdating = false;
+                return;
+            }
             data.list = prepareProcessList(data);
 
             let list = data.list.sort((a, b) => {
@@ -67,6 +87,8 @@ class Toplist {
                                 <td>${Math.round(proc.mem*10)/10}%</td>`;
                 document.getElementById("mod_toplist_table").append(el);
             });
+            this.currentlyUpdating = false;
+        }).catch(() => {
             this.currentlyUpdating = false;
         });
     }
@@ -239,7 +261,7 @@ class Toplist {
         updateProcessList();
         window.keyboard.attach();
         window.term[window.currentTerm].term.focus();
-        var updateInterval = setInterval(updateProcessList, 1000);
+        var updateInterval = setInterval(updateProcessList, window.performanceTiming ? window.performanceTiming().processListInterval : 2500);
     }
 }
 
