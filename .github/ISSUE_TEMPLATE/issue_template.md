@@ -16,8 +16,8 @@ labels: investigation
 
 ## Technical information
 **Using version:**
- - [ ] `main` (running from GitHub-published source code, currently `v1.0.0`)
- - [ ] `latest` (latest release, currently `v2.2.7`)
+ - [ ] `main` (running from GitHub-published source code)
+ - [ ] `latest` (latest release, currently `v1.0.1`)
  - [ ] `vX.X.X` (specify other version)
 
 **Running on:**

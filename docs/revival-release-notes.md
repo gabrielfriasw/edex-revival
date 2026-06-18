@@ -1,4 +1,27 @@
-# eDEX Revival v1.0.0
+# eDEX Revival Release Notes
+
+## v1.0.1
+
+Performance and release automation update for the first Revival line.
+
+### Highlights
+
+- Replaced the fixed `systeminformation` worker pool with a configurable lazy scheduler, short-lived cache, request dedupe, queue pressure scaling, idle reaping, and diagnostics counters.
+- Added Performance settings for worker limits, hidden-widget pausing, window blur pausing, globe startup, terminal WebGL/ligatures, feedback audio, cinematic audio, lazy audio, background throttling, and Error Lens capture.
+- Kept the default experience conventional and cinematic, while making lower-resource behavior available through user settings.
+- Widgets can now stop timers, chart streams, polling, and globe work when users opt into pause behavior.
+- Globe assets load only when needed, and terminal output diagnostics are debounced to reduce unnecessary renderer work.
+- GitHub Actions now publishes tagged `v*` builds directly to GitHub Releases with Windows and Linux assets.
+
+### Validation
+
+- `node --check` on touched JavaScript files.
+- `git diff --check`.
+- trailing whitespace scan.
+- `npm test`.
+- `npm start` smoke test on Windows.
+
+## v1.0.0
 
 First Revival release of eDEX, focused on keeping the original sci-fi terminal identity while making the app easier to use on modern Windows and Linux systems.
 
