@@ -26,7 +26,11 @@ const DEVFS_ICON_PATHS = {
     extensions: '<path d="M14 2H6a2 2 0 0 0-2 2v16h16V8z"/><path d="M14 2v6h6"/><path d="M8 14h8"/><path d="M8 18h5"/>',
     preview: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
     dock: '<path d="M5 20h14"/><path d="M8 16h8"/>',
+    minimize: '<path d="M5 19h14"/>',
     maximize: '<path d="M4 4h16v16H4z"/>',
+    restore: '<path d="M8 8h10v10H8z"/><path d="M6 14H4V4h10v2"/>',
+    snapLeft: '<path d="M4 4h16v16H4z"/><path d="M11 4v16"/>',
+    snapRight: '<path d="M4 4h16v16H4z"/><path d="M13 4v16"/>',
     close: '<path d="M6 6l12 12"/><path d="M18 6 6 18"/>',
     window: '<path d="M4 5h16v14H4z"/><path d="M4 9h16"/>',
     list: '<path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/>',
@@ -427,11 +431,14 @@ class DevCockpit {
             });
             window.term[number].onclose = () => {
                 delete window.term[number].onprocesschange;
-                tab.innerHTML = window.shellTabLabel ? window.shellTabLabel(number, "EMPTY") : "<p>EMPTY</p>";
-                document.getElementById(`terminal${number}`).innerHTML = "";
-                window.term[number].term.dispose();
-                delete window.term[number];
-                window.useAppShortcut("PREVIOUS_TAB");
+                if (window.resetShellTab) window.resetShellTab(number);
+                else {
+                    tab.innerHTML = window.shellTabLabel ? window.shellTabLabel(number, "EMPTY") : "<p>EMPTY</p>";
+                    document.getElementById(`terminal${number}`).innerHTML = "";
+                    window.term[number].term.dispose();
+                    delete window.term[number];
+                    window.useAppShortcut("PREVIOUS_TAB");
+                }
             };
             window.term[number].onprocesschange = processName => {
                 window.term[number].processName = processName || "";
@@ -633,6 +640,14 @@ class DevSshClient {
         return window._escapeHtml(String(value == null ? "" : value));
     }
 
+    option(value, label, current) {
+        return `<option value="${this.escape(value)}" ${value === current ? "selected" : ""}>${this.escape(label)}</option>`;
+    }
+
+    checked(value) {
+        return value ? "checked" : "";
+    }
+
     settings() {
         if (!window.settings.ssh) window.settings.ssh = {profiles: [], lastProfileId: ""};
         if (!Array.isArray(window.settings.ssh.profiles)) window.settings.ssh.profiles = [];
@@ -658,20 +673,46 @@ class DevSshClient {
             port: 22,
             keyPath: "",
             remoteCwd: "",
-            extraArgs: ""
+            extraArgs: "",
+            authMode: "default",
+            hostKeyPolicy: "default",
+            keepAlive: true,
+            keepAliveInterval: 60,
+            keepAliveCountMax: 3,
+            connectTimeout: 15,
+            forwardAgent: false,
+            identitiesOnly: false,
+            addKeysToAgent: false,
+            compression: false
         };
     }
 
     normalizeProfile(profile) {
+        const number = (value, fallback, min, max) => {
+            const parsed = Number(value);
+            if (!Number.isFinite(parsed)) return fallback;
+            return Math.max(min, Math.min(max, Math.round(parsed)));
+        };
+        const enumValue = (value, allowed, fallback) => allowed.includes(value) ? value : fallback;
         return {
             id: String(profile && profile.id || ""),
             name: String(profile && profile.name || ""),
             host: String(profile && profile.host || "").trim(),
             user: String(profile && profile.user || "").trim(),
-            port: Number(profile && profile.port) || 22,
+            port: number(profile && profile.port, 22, 1, 65535),
             keyPath: String(profile && profile.keyPath || "").trim(),
             remoteCwd: String(profile && profile.remoteCwd || "").trim(),
-            extraArgs: String(profile && profile.extraArgs || "").trim()
+            extraArgs: String(profile && profile.extraArgs || "").trim(),
+            authMode: enumValue(String(profile && profile.authMode || "default"), ["default", "password", "publickey", "keyboard-interactive"], "default"),
+            hostKeyPolicy: enumValue(String(profile && profile.hostKeyPolicy || "default"), ["default", "accept-new", "yes", "no"], "default"),
+            keepAlive: profile && typeof profile.keepAlive === "boolean" ? profile.keepAlive : true,
+            keepAliveInterval: number(profile && profile.keepAliveInterval, 60, 0, 3600),
+            keepAliveCountMax: number(profile && profile.keepAliveCountMax, 3, 1, 20),
+            connectTimeout: number(profile && profile.connectTimeout, 15, 0, 300),
+            forwardAgent: !!(profile && profile.forwardAgent),
+            identitiesOnly: !!(profile && profile.identitiesOnly),
+            addKeysToAgent: !!(profile && profile.addKeysToAgent),
+            compression: !!(profile && profile.compression)
         };
     }
 
@@ -684,6 +725,7 @@ class DevSshClient {
     }
 
     open() {
+        this.debug("open requested");
         return this.windowManager.open({
             id: "ssh-client",
             title: "SSH Client",
@@ -694,9 +736,20 @@ class DevSshClient {
         });
     }
 
+    debug(message, detail) {
+        if (typeof window.edexDebugLog === "function") {
+            window.edexDebugLog("ssh-client", message, detail);
+        }
+    }
+
     render(body, profileId) {
         const ssh = this.settings();
         const selected = this.normalizeProfile(this.selectedProfile(profileId));
+        this.debug("render start", {
+            profileCount: ssh.profiles.length,
+            hasSelected: !!selected.id,
+            requestedProfile: !!profileId
+        });
         body.dataset.activeProfileId = selected.id || "";
         const profiles = ssh.profiles.length ? ssh.profiles.map(profile => `
             <button type="button" class="${profile.id === selected.id ? "active" : ""}" data-profile-id="${this.escape(profile.id)}" title="${this.escape(profile.host)}">
@@ -714,14 +767,48 @@ class DevSshClient {
                     <div class="dev_ssh_profile_list">${profiles}</div>
                 </aside>
                 <section class="dev_ssh_form">
-                    <div class="dev_ssh_notice">Passwords are not stored. The native ssh command handles password prompts, keys, ssh-agent, and host checks inside the terminal tab.</div>
+                    <div class="dev_ssh_notice">Passwords are not stored by eDEX Revival. Use the native password prompt, SSH keys, and ssh-agent for fast reconnects.</div>
                     <input type="hidden" id="dev_ssh_id" value="${this.escape(selected.id)}">
                     <label>Name<input type="text" id="dev_ssh_name" value="${this.escape(selected.name)}" placeholder="prod / staging / home lab"></label>
                     <label>Host<input type="text" id="dev_ssh_host" value="${this.escape(selected.host)}" placeholder="example.com or 10.0.0.12"></label>
                     <label>User<input type="text" id="dev_ssh_user" value="${this.escape(selected.user)}" placeholder="optional"></label>
                     <label>Port<input type="number" id="dev_ssh_port" value="${this.escape(selected.port || 22)}" min="1" max="65535"></label>
+                    <label>Auth mode<select id="dev_ssh_authMode">
+                        ${this.option("default", "Default", selected.authMode)}
+                        ${this.option("password", "Password prompt", selected.authMode)}
+                        ${this.option("keyboard-interactive", "Keyboard-interactive", selected.authMode)}
+                        ${this.option("publickey", "Key / agent first", selected.authMode)}
+                    </select></label>
+                    <label>Host key<select id="dev_ssh_hostKeyPolicy">
+                        ${this.option("default", "Default", selected.hostKeyPolicy)}
+                        ${this.option("accept-new", "Accept new hosts", selected.hostKeyPolicy)}
+                        ${this.option("yes", "Known hosts only", selected.hostKeyPolicy)}
+                        ${this.option("no", "Skip checking", selected.hostKeyPolicy)}
+                    </select></label>
                     <label>Identity file<input type="text" id="dev_ssh_keyPath" value="${this.escape(selected.keyPath)}" placeholder="C:\\Users\\you\\.ssh\\id_ed25519"></label>
+                    <div class="dev_ssh_key_setup">
+                        <div class="dev_ssh_key_head">
+                            <strong>Key setup</strong>
+                            <span>Generate a local key, install the public key on the server, then save this profile for key login.</span>
+                        </div>
+                        <div class="dev_ssh_key_actions">
+                            <button type="button" data-action="key-generate">Generate Key</button>
+                            <button type="button" data-action="key-copy">Copy Public Key</button>
+                            <button type="button" data-action="key-install">Install on Server</button>
+                            <button type="button" data-action="key-test">Test Key</button>
+                            <button type="button" data-action="key-use">Use Key Login</button>
+                        </div>
+                        <pre class="dev_ssh_key_status">Checking SSH key status...</pre>
+                    </div>
                     <label>Remote cwd<input type="text" id="dev_ssh_remoteCwd" value="${this.escape(selected.remoteCwd)}" placeholder="/srv/app"></label>
+                    <label>Connect timeout<input type="number" id="dev_ssh_connectTimeout" value="${this.escape(selected.connectTimeout)}" min="0" max="300" step="1"></label>
+                    <label>Keepalive interval<input type="number" id="dev_ssh_keepAliveInterval" value="${this.escape(selected.keepAliveInterval)}" min="0" max="3600" step="1"></label>
+                    <label>Keepalive misses<input type="number" id="dev_ssh_keepAliveCountMax" value="${this.escape(selected.keepAliveCountMax)}" min="1" max="20" step="1"></label>
+                    <label class="dev_ssh_check"><input type="checkbox" id="dev_ssh_keepAlive" ${this.checked(selected.keepAlive)}>Keep connection alive</label>
+                    <label class="dev_ssh_check"><input type="checkbox" id="dev_ssh_forwardAgent" ${this.checked(selected.forwardAgent)}>Forward ssh-agent</label>
+                    <label class="dev_ssh_check"><input type="checkbox" id="dev_ssh_identitiesOnly" ${this.checked(selected.identitiesOnly)}>Use only this identity</label>
+                    <label class="dev_ssh_check"><input type="checkbox" id="dev_ssh_addKeysToAgent" ${this.checked(selected.addKeysToAgent)}>Add key to agent</label>
+                    <label class="dev_ssh_check"><input type="checkbox" id="dev_ssh_compression" ${this.checked(selected.compression)}>Compression</label>
                     <label class="wide">Extra args<input type="text" id="dev_ssh_extraArgs" value="${this.escape(selected.extraArgs)}" placeholder="-J jump-host -L 8080:localhost:8080"></label>
                     <div class="dev_ssh_actions">
                         <button type="button" data-action="save">Save</button>
@@ -733,11 +820,43 @@ class DevSshClient {
                     <div class="dev_ssh_status">Extra args are appended as typed. Do not put passwords here.</div>
                 </section>
             </div>`;
+        this.debug("render html applied", {
+            hasShell: !!body.querySelector(".dev_ssh_shell"),
+            hasForm: !!body.querySelector(".dev_ssh_form"),
+            formControls: body.querySelectorAll(".dev_ssh_form input, .dev_ssh_form select, .dev_ssh_form button").length,
+            childCount: body.querySelectorAll("*").length
+        });
         this.bind(body);
         this.updatePreview(body);
+        setTimeout(() => {
+            const form = body.querySelector(".dev_ssh_form");
+            const shell = body.querySelector(".dev_ssh_shell");
+            const formRect = form ? form.getBoundingClientRect() : null;
+            const shellRect = shell ? shell.getBoundingClientRect() : null;
+            const bodyRect = body.getBoundingClientRect();
+            const shellStyle = shell ? window.getComputedStyle(shell) : null;
+            const formStyle = form ? window.getComputedStyle(form) : null;
+            this.debug("render layout", {
+                shellVisible: !!(shellRect && shellRect.width > 0 && shellRect.height > 0),
+                formVisible: !!(formRect && formRect.width > 0 && formRect.height > 0),
+                bodyWidth: Math.round(bodyRect.width),
+                bodyHeight: Math.round(bodyRect.height),
+                formWidth: formRect ? Math.round(formRect.width) : 0,
+                formHeight: formRect ? Math.round(formRect.height) : 0,
+                shellDisplay: shellStyle ? shellStyle.display : "",
+                shellOverflow: shellStyle ? shellStyle.overflow : "",
+                formDisplay: formStyle ? formStyle.display : "",
+                formOverflow: formStyle ? formStyle.overflow : ""
+            });
+        }, 50);
     }
 
     bind(body) {
+        this.debug("bind start", {
+            profileButtons: body.querySelectorAll("[data-profile-id]").length,
+            actionButtons: body.querySelectorAll("[data-action]").length,
+            hasForm: !!body.querySelector(".dev_ssh_form")
+        });
         body.querySelectorAll("[data-profile-id]").forEach(button => {
             button.addEventListener("click", () => {
                 this.settings().lastProfileId = button.dataset.profileId;
@@ -750,13 +869,26 @@ class DevSshClient {
         body.querySelector("[data-action='connect']").addEventListener("click", () => this.connect(body));
         body.querySelector("[data-action='copy']").addEventListener("click", () => this.copyCommand(body));
         body.querySelector("[data-action='delete']").addEventListener("click", () => this.delete(body));
-        body.querySelectorAll("input").forEach(input => input.addEventListener("input", () => this.updatePreview(body)));
+        body.querySelector("[data-action='key-generate']").addEventListener("click", () => this.generateKey(body));
+        body.querySelector("[data-action='key-copy']").addEventListener("click", () => this.copyPublicKey(body));
+        body.querySelector("[data-action='key-install']").addEventListener("click", () => this.installPublicKey(body));
+        body.querySelector("[data-action='key-test']").addEventListener("click", () => this.testKeyLogin(body));
+        body.querySelector("[data-action='key-use']").addEventListener("click", () => this.useKeyLogin(body));
+        body.querySelectorAll("input, select").forEach(input => input.addEventListener("input", () => this.updatePreview(body)));
+        const keyPathInput = body.querySelector("#dev_ssh_keyPath");
+        if (keyPathInput) keyPathInput.addEventListener("change", () => this.refreshKeyStatus(body));
+        this.refreshKeyStatus(body);
+        this.debug("bind complete");
     }
 
     formProfile(body) {
         const value = id => {
             const input = body.querySelector(`#${id}`);
             return input ? input.value : "";
+        };
+        const checked = id => {
+            const input = body.querySelector(`#${id}`);
+            return !!(input && input.checked);
         };
         return this.normalizeProfile({
             id: value("dev_ssh_id"),
@@ -766,8 +898,201 @@ class DevSshClient {
             port: Number(value("dev_ssh_port")) || 22,
             keyPath: value("dev_ssh_keyPath"),
             remoteCwd: value("dev_ssh_remoteCwd"),
-            extraArgs: value("dev_ssh_extraArgs")
+            extraArgs: value("dev_ssh_extraArgs"),
+            authMode: value("dev_ssh_authMode"),
+            hostKeyPolicy: value("dev_ssh_hostKeyPolicy"),
+            keepAlive: checked("dev_ssh_keepAlive"),
+            keepAliveInterval: Number(value("dev_ssh_keepAliveInterval")),
+            keepAliveCountMax: Number(value("dev_ssh_keepAliveCountMax")),
+            connectTimeout: Number(value("dev_ssh_connectTimeout")),
+            forwardAgent: checked("dev_ssh_forwardAgent"),
+            identitiesOnly: checked("dev_ssh_identitiesOnly"),
+            addKeysToAgent: checked("dev_ssh_addKeysToAgent"),
+            compression: checked("dev_ssh_compression")
         });
+    }
+
+    keyPayload(body) {
+        const profile = this.formProfile(body);
+        return {
+            keyPath: profile.keyPath,
+            profile: {
+                name: profile.name,
+                host: profile.host,
+                user: profile.user,
+                port: profile.port,
+                hostKeyPolicy: profile.hostKeyPolicy,
+                connectTimeout: profile.connectTimeout
+            }
+        };
+    }
+
+    setKeyStatus(body, message, state) {
+        const target = body.querySelector(".dev_ssh_key_status");
+        if (!target) return;
+        target.className = `dev_ssh_key_status ${state || ""}`.trim();
+        target.textContent = String(message || "");
+    }
+
+    formatKeyStatus(result) {
+        if (!result) return "SSH key status unavailable.";
+        if (result.privateExists && result.publicExists) {
+            return [
+                "Key ready for this profile.",
+                result.fingerprint || "Fingerprint unavailable.",
+                `Identity: ${result.keyPath}`
+            ].join("\n");
+        }
+        return [
+            "No eDEX-managed key found yet.",
+            `Suggested identity: ${result.keyPath || result.defaultPath || ""}`,
+            result.tools && result.tools.sshKeygen ? "ssh-keygen detected." : "ssh-keygen not detected."
+        ].join("\n");
+    }
+
+    async refreshKeyStatus(body) {
+        if (!edex.sshKey) return;
+        try {
+            this.debug("key status request");
+            const result = await edex.sshKey.status(this.keyPayload(body));
+            this.debug("key status result", {
+                privateExists: !!(result && result.privateExists),
+                publicExists: !!(result && result.publicExists),
+                hasKeygen: !!(result && result.tools && result.tools.sshKeygen)
+            });
+            this.setKeyStatus(body, this.formatKeyStatus(result), result && result.privateExists && result.publicExists ? "ok" : "warn");
+        } catch(error) {
+            this.debug("key status failed", {error: error.message || String(error)});
+            this.setKeyStatus(body, error.message || String(error), "warn");
+        }
+    }
+
+    applyKeyLoginDefaults(body, keyPath) {
+        const keyInput = body.querySelector("#dev_ssh_keyPath");
+        const authMode = body.querySelector("#dev_ssh_authMode");
+        const identitiesOnly = body.querySelector("#dev_ssh_identitiesOnly");
+        const addKeysToAgent = body.querySelector("#dev_ssh_addKeysToAgent");
+        if (keyInput && keyPath) keyInput.value = keyPath;
+        if (authMode) authMode.value = "publickey";
+        if (identitiesOnly) identitiesOnly.checked = true;
+        if (addKeysToAgent) addKeysToAgent.checked = true;
+        this.updatePreview(body);
+    }
+
+    async generateKey(body) {
+        if (!edex.sshKey) return false;
+        this.debug("generate key requested");
+        this.setKeyStatus(body, "Generating ed25519 key...", "warn");
+        try {
+            const result = await edex.sshKey.generate(this.keyPayload(body));
+            this.applyKeyLoginDefaults(body, result.keyPath);
+            this.setKeyStatus(body, [
+                result.created ? "Generated a new SSH key." : "Using existing SSH key.",
+                result.fingerprint || "Fingerprint unavailable.",
+                "Next: Install on Server."
+            ].join("\n"), "ok");
+            return true;
+        } catch(error) {
+            this.debug("generate key failed", {error: error.message || String(error)});
+            this.setKeyStatus(body, error.message || String(error), "error");
+            return false;
+        }
+    }
+
+    async copyPublicKey(body) {
+        if (!edex.sshKey) return false;
+        this.debug("copy public key requested");
+        this.setKeyStatus(body, "Copying public key...", "warn");
+        try {
+            const result = await edex.sshKey.copyPublic(this.keyPayload(body));
+            this.applyKeyLoginDefaults(body, result.keyPath);
+            this.setKeyStatus(body, "Public key copied to clipboard.", "ok");
+            return true;
+        } catch(error) {
+            this.debug("copy public key failed", {error: error.message || String(error)});
+            this.setKeyStatus(body, `${error.message || String(error)}\nGenerate a key first, then copy again.`, "error");
+            return false;
+        }
+    }
+
+    async installPublicKey(body) {
+        if (!edex.sshKey) return false;
+        this.debug("install public key requested");
+        const profile = this.formProfile(body);
+        const errors = this.validate(profile);
+        const status = body.querySelector(".dev_ssh_status");
+        if (errors.length) {
+            if (status) status.textContent = errors.join(" ");
+            this.setKeyStatus(body, errors.join("\n"), "error");
+            return false;
+        }
+        this.setKeyStatus(body, "Preparing server install command...", "warn");
+        try {
+            const result = await edex.sshKey.installCommand(this.keyPayload(body));
+            this.applyKeyLoginDefaults(body, result.keyPath);
+            this.save(body);
+            if (window.spawnShellTab) {
+                window.spawnShellTab({initialCommand: result.command, label: `install key ${profile.host}`});
+                this.setKeyStatus(body, "Install terminal opened. Enter the server password once, then run Test Key before connecting.", "ok");
+                return true;
+            }
+            this.setKeyStatus(body, "No terminal tab launcher is available.", "error");
+            return false;
+        } catch(error) {
+            this.debug("install public key failed", {error: error.message || String(error)});
+            this.setKeyStatus(body, `${error.message || String(error)}\nGenerate a key first if no public key exists.`, "error");
+            return false;
+        }
+    }
+
+    async testKeyLogin(body) {
+        if (!edex.sshKey) return false;
+        this.debug("test key login requested");
+        const profile = this.formProfile(body);
+        const errors = this.validate(profile);
+        const status = body.querySelector(".dev_ssh_status");
+        if (errors.length) {
+            if (status) status.textContent = errors.join(" ");
+            this.setKeyStatus(body, errors.join("\n"), "error");
+            return false;
+        }
+        this.setKeyStatus(body, "Testing SSH key login...", "warn");
+        try {
+            const result = await edex.sshKey.test(this.keyPayload(body));
+            const notes = Array.isArray(result.notes) ? result.notes.filter(Boolean) : [];
+            const lines = [
+                result.message || "SSH key test finished.",
+                result.fingerprint || "",
+                ...notes
+            ].filter(Boolean);
+            this.setKeyStatus(body, lines.join("\n"), result.status || (result.ok ? "ok" : "error"));
+            return !!result.ok;
+        } catch(error) {
+            this.debug("test key login failed", {error: error.message || String(error)});
+            this.setKeyStatus(body, error.message || String(error), "error");
+            return false;
+        }
+    }
+
+    async useKeyLogin(body) {
+        if (!edex.sshKey) return false;
+        this.debug("use key login requested");
+        this.setKeyStatus(body, "Saving key login profile...", "warn");
+        try {
+            const result = await edex.sshKey.status(this.keyPayload(body));
+            if (!result.privateExists || !result.publicExists) {
+                this.setKeyStatus(body, "Generate a key before saving key login.", "error");
+                return false;
+            }
+            this.applyKeyLoginDefaults(body, result.keyPath);
+            const saved = this.save(body);
+            this.setKeyStatus(body, saved ? "Profile saved for SSH key login." : "Unable to save profile.", saved ? "ok" : "error");
+            return saved;
+        } catch(error) {
+            this.debug("use key login failed", {error: error.message || String(error)});
+            this.setKeyStatus(body, error.message || String(error), "error");
+            return false;
+        }
     }
 
     targetLabel(profile) {
@@ -787,8 +1112,22 @@ class DevSshClient {
             errors.push("Port must be between 1 and 65535.");
         }
         if (profile.extraArgs && /[\r\n\0]/.test(profile.extraArgs)) errors.push("Extra args cannot contain new lines.");
+        if (profile.extraArgs && /(?:sshpass|SSHPASS|password\s*=|passphrase\s*=|-pw\s+)/i.test(profile.extraArgs)) {
+            errors.push("Extra args must not store SSH passwords or passphrases.");
+        }
         if (profile.keyPath && profile.keyPath.includes("\0")) errors.push("Identity file path is invalid.");
         if (profile.remoteCwd && profile.remoteCwd.includes("\0")) errors.push("Remote cwd is invalid.");
+        if (!["default", "password", "publickey", "keyboard-interactive"].includes(profile.authMode)) errors.push("Auth mode is invalid.");
+        if (!["default", "accept-new", "yes", "no"].includes(profile.hostKeyPolicy)) errors.push("Host key policy is invalid.");
+        if (!Number.isInteger(Number(profile.connectTimeout)) || Number(profile.connectTimeout) < 0 || Number(profile.connectTimeout) > 300) {
+            errors.push("Connect timeout must be between 0 and 300 seconds.");
+        }
+        if (!Number.isInteger(Number(profile.keepAliveInterval)) || Number(profile.keepAliveInterval) < 0 || Number(profile.keepAliveInterval) > 3600) {
+            errors.push("Keepalive interval must be between 0 and 3600 seconds.");
+        }
+        if (!Number.isInteger(Number(profile.keepAliveCountMax)) || Number(profile.keepAliveCountMax) < 1 || Number(profile.keepAliveCountMax) > 20) {
+            errors.push("Keepalive misses must be between 1 and 20.");
+        }
         return errors;
     }
 
@@ -869,7 +1208,7 @@ class DevSshClient {
             return;
         }
         preview.textContent = this.buildCommand(profile);
-        if (status) status.textContent = "Ready. Extra args are appended as typed. Do not put passwords here.";
+        if (status) status.textContent = "Ready. Use keys or ssh-agent for saved access; passwords stay in the native prompt.";
     }
 
     shellFlavor() {
@@ -896,9 +1235,37 @@ class DevSshClient {
         return `'${String(value).replace(/'/g, "'\\''")}'`;
     }
 
+    sshOption(parts, key, value) {
+        if (value === "" || value == null) return;
+        parts.push("-o", `${key}=${value}`);
+    }
+
     buildCommand(profile) {
         const parts = ["ssh"];
         if (Number(profile.port) !== 22) parts.push("-p", String(Number(profile.port)));
+        if (profile.compression) parts.push("-C");
+        if (Number(profile.connectTimeout) > 0) this.sshOption(parts, "ConnectTimeout", Number(profile.connectTimeout));
+        if (profile.keepAlive && Number(profile.keepAliveInterval) > 0) {
+            this.sshOption(parts, "ServerAliveInterval", Number(profile.keepAliveInterval));
+            this.sshOption(parts, "ServerAliveCountMax", Number(profile.keepAliveCountMax) || 3);
+        }
+        if (profile.forwardAgent) this.sshOption(parts, "ForwardAgent", "yes");
+        if (profile.identitiesOnly) this.sshOption(parts, "IdentitiesOnly", "yes");
+        if (profile.addKeysToAgent) this.sshOption(parts, "AddKeysToAgent", "yes");
+        if (profile.hostKeyPolicy !== "default") this.sshOption(parts, "StrictHostKeyChecking", profile.hostKeyPolicy);
+        switch(profile.authMode) {
+            case "password":
+                this.sshOption(parts, "PreferredAuthentications", "password,keyboard-interactive");
+                break;
+            case "keyboard-interactive":
+                this.sshOption(parts, "PreferredAuthentications", "keyboard-interactive,password");
+                break;
+            case "publickey":
+                this.sshOption(parts, "PreferredAuthentications", "publickey");
+                break;
+            default:
+                break;
+        }
         if (profile.keyPath) parts.push("-i", this.localQuote(profile.keyPath));
         if (profile.extraArgs) parts.push(profile.extraArgs);
         const target = profile.user ? `${profile.user}@${profile.host}` : profile.host;
@@ -943,14 +1310,30 @@ class DevWindowManager {
         return Math.max(min, Math.min(max, number));
     }
 
+    iconMarkup(icon, label) {
+        const path = DEVFS_ICON_PATHS[icon] || "";
+        return `<svg class="dev_window_icon" viewBox="0 0 24 24" aria-hidden="true">${path}</svg><span>${this.escape(label)}</span>`;
+    }
+
+    controlButton(action, icon, label) {
+        return `<button type="button" data-action="${this.escape(action)}" title="${this.escape(label)}" aria-label="${this.escape(label)}">${this.iconMarkup(icon, label)}</button>`;
+    }
+
     open(options) {
         const id = options.id;
         if (this.windows[id]) {
+            if (typeof window.edexDebugLog === "function") {
+                window.edexDebugLog("dev-window", "focus existing", {id});
+            }
+            this.restore(id);
             this.focus(id);
             return this.windows[id];
         }
 
         const rect = this.defaultRect(id, options.rect);
+        if (typeof window.edexDebugLog === "function") {
+            window.edexDebugLog("dev-window", "open", {id, left: rect.left, top: rect.top, width: rect.width, height: rect.height});
+        }
         const element = document.createElement("section");
         element.className = `dev_window ${options.className || ""}`;
         element.dataset.windowId = id;
@@ -964,14 +1347,22 @@ class DevWindowManager {
                 <strong>${this.escape(options.title || id)}</strong>
                 <span class="dev_window_subtitle">${this.escape(options.subtitle || "")}</span>
                 <div class="dev_window_controls">
-                    <button type="button" data-action="snap-left" title="Snap left">L</button>
-                    <button type="button" data-action="snap-right" title="Snap right">R</button>
-                    <button type="button" data-action="snap-full" title="Maximize">[]</button>
-                    <button type="button" data-action="close" title="Close">X</button>
+                    ${this.controlButton("minimize", "minimize", "Minimize")}
+                    ${this.controlButton("snap-left", "snapLeft", "Snap left")}
+                    ${this.controlButton("snap-right", "snapRight", "Snap right")}
+                    ${this.controlButton("maximize", "maximize", "Maximize")}
+                    ${this.controlButton("close", "close", "Close")}
                 </div>
             </div>
             <div class="dev_window_body"></div>
-            <div class="dev_window_resize" title="Resize"></div>`;
+            <div class="dev_window_resize_edge north" data-resize-edge="n" title="Resize"></div>
+            <div class="dev_window_resize_edge east" data-resize-edge="e" title="Resize"></div>
+            <div class="dev_window_resize_edge south" data-resize-edge="s" title="Resize"></div>
+            <div class="dev_window_resize_edge west" data-resize-edge="w" title="Resize"></div>
+            <div class="dev_window_resize_corner nw" data-resize-edge="nw" title="Resize"></div>
+            <div class="dev_window_resize_corner ne" data-resize-edge="ne" title="Resize"></div>
+            <div class="dev_window_resize_corner sw" data-resize-edge="sw" title="Resize"></div>
+            <div class="dev_window_resize" data-resize-edge="se" title="Resize"></div>`;
         this.layer.appendChild(element);
 
         const record = {
@@ -981,23 +1372,43 @@ class DevWindowManager {
             title: element.querySelector(".dev_window_titlebar strong"),
             subtitle: element.querySelector(".dev_window_subtitle"),
             rect,
+            restoreRect: null,
+            minimized: false,
+            maximized: false,
             onClose: options.onClose || (() => {})
         };
         this.windows[id] = record;
-        if (typeof options.render === "function") options.render(record.body, record);
-        this.bind(record);
-        this.focus(id);
+        try {
+            if (typeof options.render === "function") options.render(record.body, record);
+            this.bind(record);
+            this.focus(id);
+            if (typeof window.edexDebugLog === "function") {
+                window.edexDebugLog("dev-window", "open complete", {id, children: record.body.querySelectorAll("*").length});
+            }
+        } catch(error) {
+            console.error(`Unable to render dev window "${id}"`, error);
+            if (typeof window.edexDebugLog === "function") {
+                window.edexDebugLog("dev-window", "render failed", {id, error: error.message || String(error)});
+            }
+            record.body.innerHTML = `<div class="dev_window_error">${this.escape(error.message || String(error))}</div>`;
+            this.bind(record);
+            this.focus(id);
+        }
         return record;
     }
 
     bind(record) {
         const titlebar = record.element.querySelector(".dev_window_titlebar");
-        const resize = record.element.querySelector(".dev_window_resize");
+        const resizeHandles = record.element.querySelectorAll("[data-resize-edge]");
         let drag = null;
+        const minWidth = 34;
+        const minHeight = 28;
+        const maxWidth = 96;
+        const maxHeight = 90;
 
         const clampRect = rect => {
-            const width = this.clamp(rect.width, 34, 96, record.rect.width);
-            const height = this.clamp(rect.height, 28, 90, record.rect.height);
+            const width = this.clamp(rect.width, minWidth, maxWidth, record.rect.width);
+            const height = this.clamp(rect.height, minHeight, maxHeight, record.rect.height);
             return {
                 left: Math.max(1, Math.min(99 - width, rect.left)),
                 top: Math.max(2, Math.min(98 - height, rect.top)),
@@ -1006,11 +1417,43 @@ class DevWindowManager {
             };
         };
 
-        const start = (event, mode) => {
+        const resizeRect = (rect, edge, dx, dy) => {
+            let left = rect.left;
+            let top = rect.top;
+            let width = rect.width;
+            let height = rect.height;
+
+            if (edge.includes("e")) width += dx;
+            if (edge.includes("s")) height += dy;
+            if (edge.includes("w")) {
+                left += dx;
+                width -= dx;
+            }
+            if (edge.includes("n")) {
+                top += dy;
+                height -= dy;
+            }
+
+            if (width < minWidth) {
+                if (edge.includes("w")) left -= minWidth - width;
+                width = minWidth;
+            }
+            if (height < minHeight) {
+                if (edge.includes("n")) top -= minHeight - height;
+                height = minHeight;
+            }
+
+            return {left, top, width, height};
+        };
+
+        const start = (event, mode, edge) => {
             if (event.target.closest("button,input,select,textarea,.cm-editor")) return;
+            if (record.minimized) return;
+            if (record.maximized) return;
             event.preventDefault();
             drag = {
                 mode,
+                edge: edge || "se",
                 startX: event.clientX,
                 startY: event.clientY,
                 rect: {...record.rect}
@@ -1020,21 +1463,39 @@ class DevWindowManager {
         };
 
         titlebar.addEventListener("mousedown", event => start(event, "move"));
-        resize.addEventListener("mousedown", event => start(event, "resize"));
+        titlebar.addEventListener("dblclick", event => {
+            if (event.target.closest("button,input,select,textarea,.cm-editor")) return;
+            event.preventDefault();
+            this.toggleMaximize(record.id);
+        });
+        resizeHandles.forEach(handle => {
+            handle.addEventListener("mousedown", event => start(event, "resize", handle.dataset.resizeEdge || "se"));
+        });
         record.element.addEventListener("mousedown", () => this.focus(record.id));
         record.element.querySelectorAll(".dev_window_controls button").forEach(button => {
             button.addEventListener("click", event => {
                 event.preventDefault();
                 event.stopPropagation();
                 switch(button.dataset.action) {
+                    case "minimize":
+                        this.toggleMinimize(record.id);
+                        break;
                     case "snap-left":
+                        this.restore(record.id);
+                        record.maximized = false;
+                        record.element.classList.remove("maximized");
                         this.setRect(record.id, {left: 1, top: 4, width: 48, height: 88});
+                        this.updateControls(record);
                         break;
                     case "snap-right":
+                        this.restore(record.id);
+                        record.maximized = false;
+                        record.element.classList.remove("maximized");
                         this.setRect(record.id, {left: 51, top: 4, width: 48, height: 88});
+                        this.updateControls(record);
                         break;
-                    case "snap-full":
-                        this.setRect(record.id, {left: 3, top: 4, width: 94, height: 88});
+                    case "maximize":
+                        this.toggleMaximize(record.id);
                         break;
                     case "close":
                         this.close(record.id);
@@ -1051,7 +1512,7 @@ class DevWindowManager {
             const dy = (event.clientY - drag.startY) / Math.max(window.innerHeight, 1) * 100;
             const rect = drag.mode === "move"
                 ? {...drag.rect, left: drag.rect.left + dx, top: drag.rect.top + dy}
-                : {...drag.rect, width: drag.rect.width + dx, height: drag.rect.height + dy};
+                : resizeRect(drag.rect, drag.edge, dx, dy);
             this.setRect(record.id, clampRect(rect), false);
         });
 
@@ -1061,17 +1522,115 @@ class DevWindowManager {
             document.body.classList.remove("dev_window_dragging");
             this.persist(record.id);
         });
+        this.updateControls(record);
     }
 
     setRect(id, rect, persist = true) {
         const record = this.windows[id];
         if (!record) return false;
         record.rect = rect;
-        record.element.style.left = `${rect.left}vw`;
-        record.element.style.top = `${rect.top}vh`;
-        record.element.style.width = `${rect.width}vw`;
-        record.element.style.height = `${rect.height}vh`;
+        if (!record.minimized) {
+            record.element.style.left = `${rect.left}vw`;
+            record.element.style.top = `${rect.top}vh`;
+            record.element.style.width = `${rect.width}vw`;
+            record.element.style.height = `${rect.height}vh`;
+        }
         if (persist) this.persist(id);
+        return true;
+    }
+
+    updateControls(record) {
+        if (!record) return;
+        const minimize = record.element.querySelector("[data-action='minimize']");
+        const maximize = record.element.querySelector("[data-action='maximize']");
+        const snapButtons = record.element.querySelectorAll("[data-action='snap-left'], [data-action='snap-right']");
+        if (minimize) {
+            const label = record.minimized ? "Restore" : "Minimize";
+            minimize.title = label;
+            minimize.setAttribute("aria-label", label);
+            minimize.innerHTML = this.iconMarkup(record.minimized ? "restore" : "minimize", label);
+        }
+        if (maximize) {
+            const label = record.maximized ? "Restore" : "Maximize";
+            maximize.disabled = !!record.minimized;
+            maximize.title = label;
+            maximize.setAttribute("aria-label", label);
+            maximize.innerHTML = this.iconMarkup(record.maximized ? "restore" : "maximize", label);
+        }
+        snapButtons.forEach(button => {
+            button.disabled = !!record.minimized;
+        });
+    }
+
+    applyStoredRect(record) {
+        record.element.style.left = `${record.rect.left}vw`;
+        record.element.style.top = `${record.rect.top}vh`;
+        record.element.style.width = `${record.rect.width}vw`;
+        record.element.style.height = `${record.rect.height}vh`;
+    }
+
+    arrangeMinimized() {
+        const width = 24;
+        const height = 3.4;
+        const gap = 0.6;
+        const perRow = Math.max(1, Math.floor(96 / (width + gap)));
+        Object.keys(this.windows)
+            .map(id => this.windows[id])
+            .filter(record => record.minimized)
+            .forEach((record, index) => {
+                const row = Math.floor(index / perRow);
+                const col = index % perRow;
+                record.element.style.left = `${1 + col * (width + gap)}vw`;
+                record.element.style.top = `${94 - row * (height + 0.5)}vh`;
+                record.element.style.width = `${width}vw`;
+                record.element.style.height = `${height}vh`;
+            });
+    }
+
+    restore(id) {
+        const record = this.windows[id];
+        if (!record || !record.minimized) return false;
+        record.minimized = false;
+        record.element.classList.remove("minimized");
+        this.applyStoredRect(record);
+        this.arrangeMinimized();
+        this.updateControls(record);
+        return true;
+    }
+
+    toggleMinimize(id) {
+        const record = this.windows[id];
+        if (!record) return false;
+        if (record.minimized) {
+            this.restore(id);
+            this.focus(id);
+            return true;
+        }
+        record.minimized = true;
+        record.element.classList.add("minimized");
+        this.arrangeMinimized();
+        this.updateControls(record);
+        return true;
+    }
+
+    toggleMaximize(id) {
+        const record = this.windows[id];
+        if (!record) return false;
+        if (record.minimized) this.restore(id);
+        if (record.maximized) {
+            const target = record.restoreRect || record.rect;
+            record.maximized = false;
+            record.restoreRect = null;
+            record.element.classList.remove("maximized");
+            this.setRect(id, target);
+        } else {
+            record.restoreRect = {...record.rect};
+            record.maximized = true;
+            record.element.classList.add("maximized");
+            this.setRect(id, {left: 2, top: 4, width: 96, height: 90});
+        }
+        this.focus(id);
+        this.updateControls(record);
         return true;
     }
 
@@ -1106,6 +1665,7 @@ class DevWindowManager {
         if (record.onClose(record) === false) return false;
         record.element.remove();
         delete this.windows[id];
+        this.arrangeMinimized();
         return true;
     }
 }
@@ -3630,7 +4190,7 @@ class ExplorerRenderer {
                     <span id="devfs_window_path"></span>
                 </div>
                 <div class="devfs_window_controls">
-                    ${this.renderIconButton('data-surface-mode="dock"', "dock", "Dock", "compact")}
+                    ${this.renderIconButton('data-surface-mode="dock"', "minimize", "Minimize", "compact")}
                     ${this.renderIconButton('data-surface-mode="cockpit"', "maximize", "Maximize", "compact")}
                     ${this.renderIconButton('data-surface-mode="dock"', "close", "Close to dock", "compact")}
                 </div>
@@ -3668,7 +4228,14 @@ class ExplorerRenderer {
                 </div>
                 <div id="fs_space_bar"><h1>EXIT DISPLAY</h1><h3 id="devfs_status">Waiting for directory...</h3><progress value="100" max="100"></progress><div id="devfs_ops"></div></div>
             </div>
-            <div class="devfs_resize_handle" title="Resize"></div>`;
+            <div class="devfs_resize_edge north" data-devfs-resize-edge="n" title="Resize"></div>
+            <div class="devfs_resize_edge east" data-devfs-resize-edge="e" title="Resize"></div>
+            <div class="devfs_resize_edge south" data-devfs-resize-edge="s" title="Resize"></div>
+            <div class="devfs_resize_edge west" data-devfs-resize-edge="w" title="Resize"></div>
+            <div class="devfs_resize_corner nw" data-devfs-resize-edge="nw" title="Resize"></div>
+            <div class="devfs_resize_corner ne" data-devfs-resize-edge="ne" title="Resize"></div>
+            <div class="devfs_resize_corner sw" data-devfs-resize-edge="sw" title="Resize"></div>
+            <div class="devfs_resize_handle" data-devfs-resize-edge="se" title="Resize"></div>`;
 
         this.filesContainer = this.container.querySelector("#fs_disp_container");
         this.inspector = this.container.querySelector("#devfs_inspector");
@@ -3730,12 +4297,16 @@ class ExplorerRenderer {
 
     bindWindowFrame() {
         const bar = this.container.querySelector(".devfs_window_bar");
-        const handle = this.container.querySelector(".devfs_resize_handle");
+        const handles = this.container.querySelectorAll("[data-devfs-resize-edge]");
         let dragState = null;
+        const minWidth = 52;
+        const minHeight = 42;
+        const maxWidth = 96;
+        const maxHeight = 90;
 
         const clampRect = rect => {
-            const width = Math.max(52, Math.min(96, rect.width));
-            const height = Math.max(42, Math.min(90, rect.height));
+            const width = Math.max(minWidth, Math.min(maxWidth, rect.width));
+            const height = Math.max(minHeight, Math.min(maxHeight, rect.height));
             return {
                 left: Math.max(1, Math.min(99 - width, rect.left)),
                 top: Math.max(2, Math.min(96 - height, rect.top)),
@@ -3744,12 +4315,40 @@ class ExplorerRenderer {
             };
         };
 
-        const start = (event, mode) => {
+        const resizeRect = (rect, edge, dx, dy) => {
+            let left = rect.left;
+            let top = rect.top;
+            let width = rect.width;
+            let height = rect.height;
+
+            if (edge.includes("e")) width += dx;
+            if (edge.includes("s")) height += dy;
+            if (edge.includes("w")) {
+                left += dx;
+                width -= dx;
+            }
+            if (edge.includes("n")) {
+                top += dy;
+                height -= dy;
+            }
+            if (width < minWidth) {
+                if (edge.includes("w")) left -= minWidth - width;
+                width = minWidth;
+            }
+            if (height < minHeight) {
+                if (edge.includes("n")) top -= minHeight - height;
+                height = minHeight;
+            }
+            return {left, top, width, height};
+        };
+
+        const start = (event, mode, edge) => {
             if (this.browser.store.surfaceMode !== "window") return;
             if (event.target.closest("button,input,select")) return;
             event.preventDefault();
             dragState = {
                 mode,
+                edge: edge || "se",
                 startX: event.clientX,
                 startY: event.clientY,
                 rect: {...this.browser.store.windowRect}
@@ -3758,7 +4357,9 @@ class ExplorerRenderer {
         };
 
         bar.addEventListener("mousedown", event => start(event, "move"));
-        handle.addEventListener("mousedown", event => start(event, "resize"));
+        handles.forEach(handle => {
+            handle.addEventListener("mousedown", event => start(event, "resize", handle.dataset.devfsResizeEdge || "se"));
+        });
 
         document.addEventListener("mousemove", event => {
             if (!dragState) return;
@@ -3771,9 +4372,7 @@ class ExplorerRenderer {
                     top: dragState.rect.top + dy
                 }
                 : {
-                    ...dragState.rect,
-                    width: dragState.rect.width + dx,
-                    height: dragState.rect.height + dy
+                    ...resizeRect(dragState.rect, dragState.edge, dx, dy)
                 };
             this.browser.setWindowRect(clampRect(rect), false);
         });

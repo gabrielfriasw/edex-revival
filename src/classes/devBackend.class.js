@@ -825,6 +825,17 @@ function quoteCmd(value) {
     return `"${String(value).replace(/"/g, '""')}"`;
 }
 
+function quoteLocalShellArg(value, shellPath) {
+    const shellName = path.basename(shellPath || "").toLowerCase();
+    if (process.platform === "win32") {
+        if (shellName.includes("powershell") || shellName.includes("pwsh")) return quotePowerShell(value);
+        if (shellName.includes("cmd")) return quoteCmd(value);
+        if (shellName.includes("bash") || shellName === "sh" || shellName.startsWith("sh.") || shellName.includes("zsh") || shellName.includes("fish")) return quotePosix(value);
+        return quotePowerShell(value);
+    }
+    return quotePosix(value);
+}
+
 function splitShellArgs(value) {
     if (Array.isArray(value)) return value.map(item => String(item));
     const raw = String(value || "").trim();
@@ -901,6 +912,371 @@ function terminalCommandForPath(rawTarget, settings = {}) {
     }
 
     return `cd ${quotePosix(target)}`;
+}
+
+function sshDirPath() {
+    return path.join(os.homedir(), ".ssh");
+}
+
+function isInsidePath(parent, child) {
+    const relative = path.relative(parent, child);
+    return relative === "" || (!!relative && !relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function safeSshKeySlug(value, fallback = "default") {
+    const slug = String(value || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9_.-]+/g, "_")
+        .replace(/^_+|_+$/g, "")
+        .slice(0, 64);
+    return slug || fallback;
+}
+
+function defaultSshKeyPath(profile = {}) {
+    const target = [profile.user, profile.host].filter(Boolean).join("@") || profile.name || "default";
+    return path.join(sshDirPath(), `edex_revival_${safeSshKeySlug(target)}_ed25519`);
+}
+
+function resolveSshKeyPath(rawPath, profile = {}) {
+    const baseDir = path.resolve(sshDirPath());
+    const requested = String(rawPath || "").trim();
+    const target = requested
+        ? (path.isAbsolute(requested) ? path.resolve(requested) : path.resolve(baseDir, requested))
+        : defaultSshKeyPath(profile);
+    if (!isSafeLocalPath(target)) throw new Error("Invalid SSH key path.");
+    if (target.endsWith(".pub")) throw new Error("Use the private key path, not the .pub file.");
+    if (!isInsidePath(baseDir, target)) throw new Error("SSH key setup can only manage keys under your .ssh folder.");
+    const basename = path.basename(target);
+    if (!/^[A-Za-z0-9._-]+$/.test(basename)) throw new Error("SSH key filename can only use letters, numbers, dots, dashes and underscores.");
+    return target;
+}
+
+function normalizeSshProfileInput(profile = {}) {
+    const host = String(profile.host || "").trim();
+    const user = String(profile.user || "").trim();
+    const port = clampInteger(Number(profile.port) || 22, 1, 65535, 22);
+    const endpointPattern = /^[A-Za-z0-9_.:%+\-[\]]+$/;
+    const userPattern = /^[A-Za-z0-9_.+\-]+$/;
+    if (!host) throw new Error("Host is required.");
+    if (!endpointPattern.test(host)) throw new Error("Host contains unsupported characters.");
+    if (user && !userPattern.test(user)) throw new Error("User contains unsupported characters.");
+    return {
+        name: String(profile.name || "").trim(),
+        host,
+        user,
+        port,
+        hostKeyPolicy: ["default", "accept-new", "yes", "no"].includes(profile.hostKeyPolicy) ? profile.hostKeyPolicy : "default"
+    };
+}
+
+function validatePublicSshKey(publicKey) {
+    const key = stripControlText(publicKey).trim();
+    if (key.length < 40 || key.length > 16000) throw new Error("Public key content is invalid.");
+    if (!/^(ssh-ed25519|sk-ssh-ed25519@openssh\.com|ecdsa-sha2-nistp[0-9]+|ssh-rsa)\s+[A-Za-z0-9+/=]+(?:\s+.*)?$/.test(key)) {
+        throw new Error("Public key format is not supported.");
+    }
+    return key;
+}
+
+function publicSshKeyMaterial(publicKey) {
+    return validatePublicSshKey(publicKey).split(/\s+/).slice(0, 2).join(" ");
+}
+
+function runProcess(command, args, options = {}) {
+    return new Promise((resolve, reject) => {
+        const child = childProcess.spawn(command, args, {
+            cwd: options.cwd || os.homedir(),
+            env: Object.assign({}, process.env, options.env || {}),
+            windowsHide: true
+        });
+        let stdout = "";
+        let stderr = "";
+        let settled = false;
+        const finish = (error, result) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            if (error) reject(error);
+            else resolve(result);
+        };
+        const timer = setTimeout(() => {
+            try {
+                child.kill();
+            } catch(e) {}
+            finish(new Error(`${path.basename(command)} timed out.`));
+        }, options.timeoutMs || 10000);
+        child.stdout.on("data", chunk => {
+            stdout = (stdout + chunk.toString()).slice(-12000);
+        });
+        child.stderr.on("data", chunk => {
+            stderr = (stderr + chunk.toString()).slice(-12000);
+        });
+        child.on("error", error => finish(error));
+        child.on("close", code => {
+            const result = {
+                code,
+                stdout: stripControlText(stdout).trim(),
+                stderr: stripControlText(stderr).trim()
+            };
+            if (code === 0) {
+                finish(null, result);
+            } else if (options.allowFailure) {
+                finish(null, result);
+            } else {
+                finish(new Error(result.stderr || result.stdout || `${path.basename(command)} exited with code ${code}.`));
+            }
+        });
+    });
+}
+
+async function readSshPublicKey(rawKeyPath, profile = {}) {
+    const keyPath = resolveSshKeyPath(rawKeyPath, profile);
+    const publicPath = `${keyPath}.pub`;
+    const stats = await fsp.stat(publicPath);
+    if (!stats.isFile() || stats.size > 16000) throw new Error("Public key file is invalid.");
+    return {
+        keyPath,
+        publicPath,
+        publicKey: validatePublicSshKey(await fsp.readFile(publicPath, "utf-8"))
+    };
+}
+
+async function sshKeyFingerprint(publicPath) {
+    const tool = await detectCommand("ssh-keygen");
+    if (!tool.available) return "";
+    try {
+        const result = await runProcess(tool.path || tool.executable || "ssh-keygen", ["-lf", publicPath], {timeoutMs: 5000});
+        return result.stdout;
+    } catch(error) {
+        return "";
+    }
+}
+
+async function sshKeyStatus(options = {}) {
+    const profile = options.profile || {};
+    const keyPath = resolveSshKeyPath(options.keyPath, profile);
+    const publicPath = `${keyPath}.pub`;
+    const [sshKeygen, sshCopyId] = await Promise.all([
+        detectCommand("ssh-keygen"),
+        detectCommand("ssh-copy-id")
+    ]);
+    const privateStat = await fsp.stat(keyPath).catch(() => null);
+    const publicStat = await fsp.stat(publicPath).catch(() => null);
+    let publicKey = "";
+    let fingerprint = "";
+    if (publicStat && publicStat.isFile() && publicStat.size <= 16000) {
+        publicKey = validatePublicSshKey(await fsp.readFile(publicPath, "utf-8"));
+        fingerprint = await sshKeyFingerprint(publicPath);
+    }
+    return {
+        keyPath,
+        publicPath,
+        privateExists: !!(privateStat && privateStat.isFile()),
+        publicExists: !!(publicStat && publicStat.isFile()),
+        publicKey,
+        fingerprint,
+        defaultPath: defaultSshKeyPath(profile),
+        tools: {
+            sshKeygen: sshKeygen.available,
+            sshCopyId: sshCopyId.available
+        }
+    };
+}
+
+async function generateSshKey(options = {}) {
+    const profile = options.profile || {};
+    const keyPath = resolveSshKeyPath(options.keyPath, profile);
+    const publicPath = `${keyPath}.pub`;
+    const privateExists = await fsp.stat(keyPath).then(stats => stats.isFile()).catch(() => false);
+    const publicExists = await fsp.stat(publicPath).then(stats => stats.isFile()).catch(() => false);
+    if (privateExists || publicExists) {
+        if (privateExists && publicExists) {
+            return Object.assign(await sshKeyStatus({keyPath, profile}), {created: false, reused: true});
+        }
+        throw new Error("A partial SSH key already exists at this path. Choose another key name or repair the missing .pub/private pair.");
+    }
+
+    const tool = await detectCommand("ssh-keygen");
+    if (!tool.available) throw new Error("ssh-keygen was not found. Install OpenSSH client first.");
+
+    await fsp.mkdir(path.dirname(keyPath), {recursive: true, mode: 0o700});
+    await fsp.chmod(path.dirname(keyPath), 0o700).catch(() => {});
+    const commentTarget = [profile.user, profile.host].filter(Boolean).join("@") || profile.name || "edex-revival";
+    const comment = `edex-revival-${safeSshKeySlug(commentTarget)}`;
+    await runProcess(tool.path || tool.executable || "ssh-keygen", [
+        "-t", "ed25519",
+        "-a", "64",
+        "-f", keyPath,
+        "-C", comment,
+        "-N", ""
+    ], {timeoutMs: 15000});
+    await fsp.chmod(keyPath, 0o600).catch(() => {});
+    await fsp.chmod(publicPath, 0o644).catch(() => {});
+    return Object.assign(await sshKeyStatus({keyPath, profile}), {created: true, reused: false});
+}
+
+async function buildSshKeyInstallCommand(options = {}, settings = {}) {
+    const profile = normalizeSshProfileInput(options.profile || {});
+    const key = await readSshPublicKey(options.keyPath, profile);
+    const privateStat = await fsp.stat(key.keyPath).catch(() => null);
+    if (!privateStat || !privateStat.isFile()) throw new Error("Private key file is missing.");
+    const remoteKey = quotePosix(publicSshKeyMaterial(key.publicKey));
+    const remoteCommand = [
+        "umask 077",
+        "mkdir -p ~/.ssh",
+        "touch ~/.ssh/authorized_keys",
+        `{ grep -qxF ${remoteKey} ~/.ssh/authorized_keys || printf '%s\\n' ${remoteKey} >> ~/.ssh/authorized_keys; }`,
+        "chmod go-w ~",
+        "chmod 700 ~/.ssh",
+        "chmod 600 ~/.ssh/authorized_keys",
+        "printf '%s\\n' 'eDEX SSH key ready'"
+    ].join(" && ");
+    const parts = ["ssh"];
+    if (profile.port !== 22) parts.push("-p", String(profile.port));
+    parts.push("-o", "PreferredAuthentications=password,keyboard-interactive");
+    if (profile.hostKeyPolicy !== "default") parts.push("-o", `StrictHostKeyChecking=${profile.hostKeyPolicy}`);
+    const target = profile.user ? `${profile.user}@${profile.host}` : profile.host;
+    parts.push(target, quoteLocalShellArg(remoteCommand, settings.shell));
+    return {
+        command: parts.join(" "),
+        keyPath: key.keyPath,
+        publicPath: key.publicPath
+    };
+}
+
+function analyzeSshKeyTest(result) {
+    const output = `${result.stdout || ""}\n${result.stderr || ""}`;
+    const lower = output.toLowerCase();
+    const authMatch = output.match(/Authentications that can continue:\s*([^\r\n]+)/i);
+    const notes = [];
+    const offered = /offering public key/i.test(output) || /will attempt key/i.test(output);
+    const accepted = /server accepts key/i.test(output) || String(result.stdout || "").includes("EDEX_SSH_KEY_OK");
+
+    if (offered) notes.push("Local key was offered to the server.");
+    if (accepted) notes.push("Server accepted the key.");
+    if (authMatch) notes.push(`Server auth methods after refusal: ${authMatch[1].trim()}.`);
+
+    if (result.code === 0 && accepted) {
+        return {
+            ok: true,
+            status: "ok",
+            message: "SSH key login succeeded.",
+            notes
+        };
+    }
+
+    if (offered && /permission denied/i.test(output)) {
+        notes.push("Run Install on Server again to repair key file permissions, then test again.");
+        notes.push("If it still fails, check server-side AuthorizedKeysFile, PubkeyAuthentication, StrictModes, sshd logs, and the target user.");
+        return {
+            ok: false,
+            status: "error",
+            message: "The server rejected the offered public key.",
+            notes
+        };
+    }
+
+    if (/unprotected private key file|bad permissions|permissions are too open/i.test(output)) {
+        return {
+            ok: false,
+            status: "error",
+            message: "OpenSSH refused the local private key because its file permissions are too open.",
+            notes
+        };
+    }
+
+    if (!offered && /identity file .* not accessible|load key .*: no such file/i.test(lower)) {
+        return {
+            ok: false,
+            status: "error",
+            message: "The configured private key file is not readable.",
+            notes
+        };
+    }
+
+    if (!offered && /load key .*invalid format|error in libcrypto|invalid format/i.test(lower)) {
+        return {
+            ok: false,
+            status: "error",
+            message: "OpenSSH could not read the local private key format.",
+            notes
+        };
+    }
+
+    if (/no mutual signature algorithm|signature algorithm|key type .* not in pubkeyacceptedalgorithms/i.test(lower)) {
+        notes.push("The server may not accept this key algorithm. Try an RSA key if the server is old.");
+        return {
+            ok: false,
+            status: "error",
+            message: "The server and client could not agree on a public key algorithm.",
+            notes
+        };
+    }
+
+    if (/host key verification failed|strict host key checking/i.test(lower)) {
+        return {
+            ok: false,
+            status: "error",
+            message: "Host key verification blocked the test.",
+            notes
+        };
+    }
+
+    if (/connection timed out|operation timed out|connection refused|could not resolve hostname|no route to host/i.test(lower)) {
+        return {
+            ok: false,
+            status: "error",
+            message: "The SSH endpoint could not be reached.",
+            notes
+        };
+    }
+
+    return {
+        ok: false,
+        status: "error",
+        message: result.code === 0 ? "SSH key test finished without confirmation." : "SSH key login failed.",
+        notes
+    };
+}
+
+async function testSshKeyLogin(options = {}) {
+    const profile = normalizeSshProfileInput(options.profile || {});
+    const key = await readSshPublicKey(options.keyPath, profile);
+    const privateStat = await fsp.stat(key.keyPath).catch(() => null);
+    if (!privateStat || !privateStat.isFile()) throw new Error("Private key file is missing.");
+
+    const tool = await detectCommand("ssh");
+    if (!tool.available) throw new Error("ssh was not found. Install OpenSSH client first.");
+
+    const target = profile.user ? `${profile.user}@${profile.host}` : profile.host;
+    const connectTimeout = clampInteger(Number(options.profile && options.profile.connectTimeout) || 15, 1, 300, 15);
+    const args = [
+        "-vvv",
+        "-o", "BatchMode=yes",
+        "-o", "PasswordAuthentication=no",
+        "-o", "KbdInteractiveAuthentication=no",
+        "-o", "PreferredAuthentications=publickey",
+        "-o", "PubkeyAuthentication=yes",
+        "-o", "IdentitiesOnly=yes",
+        "-o", `ConnectTimeout=${connectTimeout}`,
+        "-i", key.keyPath
+    ];
+    if (profile.port !== 22) args.push("-p", String(profile.port));
+    if (profile.hostKeyPolicy !== "default") args.push("-o", `StrictHostKeyChecking=${profile.hostKeyPolicy}`);
+    args.push(target, "printf '%s\\n' EDEX_SSH_KEY_OK");
+
+    const result = await runProcess(tool.path || tool.executable || "ssh", args, {
+        timeoutMs: Math.max(8000, connectTimeout * 1000 + 5000),
+        allowFailure: true
+    });
+    const analysis = analyzeSshKeyTest(result);
+    const fingerprint = await sshKeyFingerprint(key.publicPath);
+    return Object.assign(analysis, {
+        code: result.code,
+        keyPath: key.keyPath,
+        publicPath: key.publicPath,
+        fingerprint
+    });
 }
 
 function testCommandForShell(shellPath) {
@@ -1811,6 +2187,37 @@ function registerDevBackend({app, ipc, shell, getWindow, settingsFile, isTrusted
                 error: error.message || String(error)
             };
         }
+    });
+
+    ipc.handle("edex:ssh-key-status", async (event, options) => {
+        if (!trusted(event)) return null;
+        return sshKeyStatus(options || {});
+    });
+
+    ipc.handle("edex:ssh-key-generate", async (event, options) => {
+        if (!trusted(event)) return null;
+        return generateSshKey(options || {});
+    });
+
+    ipc.handle("edex:ssh-key-copy-public", async (event, options) => {
+        if (!trusted(event)) return false;
+        const key = await readSshPublicKey(options && options.keyPath, options && options.profile || {});
+        clipboard.writeText(key.publicKey);
+        return {
+            copied: true,
+            keyPath: key.keyPath,
+            publicPath: key.publicPath
+        };
+    });
+
+    ipc.handle("edex:ssh-key-install-command", async (event, options) => {
+        if (!trusted(event)) return null;
+        return buildSshKeyInstallCommand(options || {}, readSettings());
+    });
+
+    ipc.handle("edex:ssh-key-test", async (event, options) => {
+        if (!trusted(event)) return null;
+        return testSshKeyLogin(options || {});
     });
 
     ipc.handle("edex:network-resolve-endpoint", async (event, endpoint) => {

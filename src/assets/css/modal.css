@@ -192,6 +192,55 @@ div.modal_popup td select {
     font-size: 1.4vh;
 }
 
+.update_status_panel {
+    width: min(48vw, 64vh);
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.8vh;
+    margin-bottom: 1.2vh;
+}
+
+.update_status_panel strong,
+.update_status_panel span {
+    min-width: 0;
+}
+
+.update_status_panel strong {
+    font-size: 1.9vh;
+}
+
+.update_status_panel span {
+    font-family: var(--font_mono);
+    font-size: 1.25vh;
+    opacity: 0.78;
+}
+
+.update_progress {
+    min-height: 2.8vh;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) max-content;
+    gap: 0.8vw;
+    align-items: center;
+}
+
+.update_progress progress {
+    width: 100%;
+    height: 1.4vh;
+    accent-color: rgb(var(--color_r), var(--color_g), var(--color_b));
+}
+
+.update_actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.update_actions button {
+    margin-left: 0;
+    border-radius: 0.25vh;
+    border-bottom-left-radius: 0.25vh;
+    border-bottom-right-radius: 0.25vh;
+}
+
 div.modal_popup summary {
     font-size: 1.9vh;
     font-weight: normal;

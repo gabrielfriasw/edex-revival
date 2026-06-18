@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+No unreleased changes yet.
+
+## v1.0.2 - 2026-06-18
+
+- Added a native packaged auto-update flow with background download, progress UI, restart/install action, install-on-quit support, and Settings toggles.
+- Added guided SSH key setup: generate an Ed25519 key, copy the public key, build an install command, test key login, and switch profiles to key-based authentication.
+- Added SSH keepalive, timeout, key-agent, auth-mode, host-key, compression, and diagnostics controls while preserving the no-password-storage policy.
+- Fixed PowerShell SSH command quoting so generated install commands do not corrupt quoted remote commands.
+- Improved SSH key diagnostics for unreadable keys, refused keys, remote permission issues, and accepted authentication methods.
+- Fixed terminal copy/paste shortcuts for Ctrl+Shift+C, Ctrl+Shift+V, Ctrl+Insert, and Shift+Insert.
+- Added close controls for terminal tabs with safer active-tab handling.
+- Reworked floating developer windows with minimize-to-dock, restore, maximize, snap left/right, close, and edge/corner resizing.
+- Hardened cockpit, SSH, terminal, and modal surfaces against theme bleed-through and plain-text fallback rendering.
+- Added launcher, dev window, and SSH debug logs to make UI failures easier to diagnose.
+
+## v1.0.1
+
+- Replaced the fixed `systeminformation` worker pool with a lazy scheduler, cache, request dedupe, queue pressure scaling, idle reaping, and diagnostics counters.
+- Added Performance settings for worker limits, hidden-widget pausing, window blur pausing, globe startup, terminal WebGL/ligatures, feedback audio, cinematic audio, lazy audio, background throttling, and Error Lens capture.
+- Reduced renderer and widget work when users opt into pause behavior.
+- Added GitHub Actions release automation for tagged `v*` builds with Windows and Linux assets.
+
+## v1.0.0
+
 - Renamed the app metadata to eDEX Revival 1.0.0 under `com.frias.edexrevival`, with Gabriel Frias as Revival author while preserving original eDEX-UI attribution.
 - Added Revival layout presets: Classic, Minimal, Developer, Privacy, and Cinematic.
 - Added the auto-hide icon launcher header for Settings, Widgets, Explorer, Diagnostics, Editor, SSH, Network Lens, Theme Tools, and Layout Tools.

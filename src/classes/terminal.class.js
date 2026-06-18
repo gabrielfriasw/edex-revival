@@ -529,7 +529,37 @@ class Terminal {
                 });
             }
             this.term.attachCustomKeyEventHandler(e => {
-                window.keyboard.keydownHandler(e);
+                if (e.type === "keydown") {
+                    const key = String(e.key || "").toLowerCase();
+                    const ctrlOrMeta = e.ctrlKey || e.metaKey;
+                    if (ctrlOrMeta && e.shiftKey && key === "c") {
+                        if (this.clipboard) this.clipboard.copy();
+                        e.preventDefault();
+                        e.stopPropagation();
+                        return false;
+                    }
+                    if (ctrlOrMeta && e.shiftKey && key === "v") {
+                        if (this.clipboard) this.clipboard.paste();
+                        e.preventDefault();
+                        e.stopPropagation();
+                        return false;
+                    }
+                    if (ctrlOrMeta && e.key === "Insert") {
+                        if (this.clipboard) this.clipboard.copy();
+                        e.preventDefault();
+                        e.stopPropagation();
+                        return false;
+                    }
+                    if (e.shiftKey && e.key === "Insert") {
+                        if (this.clipboard) this.clipboard.paste();
+                        e.preventDefault();
+                        e.stopPropagation();
+                        return false;
+                    }
+                }
+                if (e.type === "keydown" && window.keyboard && typeof window.keyboard.keydownHandler === "function") {
+                    window.keyboard.keydownHandler(e);
+                }
                 return true;
             });
             // Prevent soft-keyboard on touch devices #733
@@ -698,14 +728,20 @@ class Terminal {
 
             this.clipboard = {
                 copy: () => {
-                    if (!this.term.hasSelection()) return false;
-                    document.execCommand("copy");
+                    const selection = this.term.getSelection();
+                    if (!selection) return false;
+                    edex.clipboard.writeText(selection);
                     this.term.clearSelection();
                     this.clipboard.didCopy = true;
+                    return true;
                 },
                 paste: () => {
-                    this.write(edex.clipboard.readText());
+                    const text = edex.clipboard.readText();
+                    if (!text) return false;
+                    if (typeof this.term.paste === "function") this.term.paste(text);
+                    else this.write(text);
                     this.clipboard.didCopy = false;
+                    return true;
                 },
                 didCopy: false
             };

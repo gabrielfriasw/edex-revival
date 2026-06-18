@@ -40,7 +40,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: Windows-Installer
-          path: dist/*.exe
+          path: |
+            dist/*.exe
+            dist/*.exe.blockmap
+            dist/latest*.yml
           if-no-files-found: error
 
   build-linux:
@@ -68,7 +71,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: Linux-AppImage
-          path: dist/*.AppImage
+          path: |
+            dist/*.AppImage
+            dist/*.AppImage.blockmap
+            dist/latest*.yml
           if-no-files-found: error
 
   publish-release:
@@ -81,6 +87,8 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: release-artifacts
@@ -93,24 +101,40 @@ jobs:
         run: |
           set -euo pipefail
 
-          mapfile -t files < <(find release-artifacts -type f \( -name '*.exe' -o -name '*.AppImage' \) | sort)
+          mapfile -t files < <(find release-artifacts -type f \( -name '*.exe' -o -name '*.exe.blockmap' -o -name '*.AppImage' -o -name '*.AppImage.blockmap' -o -name 'latest*.yml' \) | sort)
           if [ "${#files[@]}" -eq 0 ]; then
             echo "No release assets found."
             exit 1
           fi
 
           title="eDEX Revival ${TAG_NAME}"
+          notes_args=(--generate-notes)
+          if [ -f docs/revival-release-notes.md ]; then
+            awk -v tag="${TAG_NAME}" '
+              $0 == "## " tag { capture = 1; next }
+              capture && /^## / { exit }
+              capture { print }
+            ' docs/revival-release-notes.md > release-notes.md
+
+            if [ -s release-notes.md ]; then
+              notes_args=(--notes-file release-notes.md)
+            fi
+          fi
+
           prerelease_args=()
           if [[ "${TAG_NAME}" == *-* ]]; then
             prerelease_args+=(--prerelease)
           fi
 
           if gh release view "${TAG_NAME}" --repo "${GH_REPO}" >/dev/null 2>&1; then
+            if [ "${notes_args[0]}" = "--notes-file" ]; then
+              gh release edit "${TAG_NAME}" --repo "${GH_REPO}" --title "${title}" "${notes_args[@]}"
+            fi
             gh release upload "${TAG_NAME}" "${files[@]}" --repo "${GH_REPO}" --clobber
           else
             gh release create "${TAG_NAME}" "${files[@]}" \
               --repo "${GH_REPO}" \
               --title "${title}" \
-              --generate-notes \
+              "${notes_args[@]}" \
               "${prerelease_args[@]}"
           fi

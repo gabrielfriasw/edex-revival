@@ -458,6 +458,13 @@ contextBridge.exposeInMainWorld("edex", {
     shell: {
         test: options => ipcRenderer.invoke("edex:shell-test", options || {})
     },
+    sshKey: {
+        status: options => ipcRenderer.invoke("edex:ssh-key-status", options || {}),
+        generate: options => ipcRenderer.invoke("edex:ssh-key-generate", options || {}),
+        copyPublic: options => ipcRenderer.invoke("edex:ssh-key-copy-public", options || {}),
+        installCommand: options => ipcRenderer.invoke("edex:ssh-key-install-command", options || {}),
+        test: options => ipcRenderer.invoke("edex:ssh-key-test", options || {})
+    },
     networkLens: {
         resolveEndpoint: endpoint => ipcRenderer.invoke("edex:network-resolve-endpoint", endpoint)
     },
@@ -465,6 +472,18 @@ contextBridge.exposeInMainWorld("edex", {
     platform: process.platform,
     screen: {
         getAllDisplays: () => ipcRenderer.sendSync("edex:screen-sync", "getAllDisplays")
+    },
+    updates: {
+        state: () => ipcRenderer.invoke("edex:updates-state"),
+        check: () => ipcRenderer.invoke("edex:updates-check"),
+        download: () => ipcRenderer.invoke("edex:updates-download"),
+        install: () => ipcRenderer.invoke("edex:updates-install"),
+        onEvent: callback => {
+            if (typeof callback !== "function") return () => {};
+            const listener = (event, state) => callback(state);
+            ipcRenderer.on("edex:update-event", listener);
+            return () => ipcRenderer.removeListener("edex:update-event", listener);
+        }
     },
     setVisualZoomLevelLimits: (minimum, maximum) => webFrame.setVisualZoomLevelLimits(minimum, maximum),
     startup: {

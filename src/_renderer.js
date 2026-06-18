@@ -39,6 +39,20 @@ const path = require("path");
 const fs = require("fs");
 const ipc = edex.ipc;
 
+window.edexDebugLog = (scope, message, detail) => {
+    const prefix = `[${String(scope || "debug")}] ${String(message || "")}`;
+    const suffix = detail && typeof detail === "object"
+        ? " "+JSON.stringify(detail)
+        : (detail ? " "+String(detail) : "");
+    const line = prefix + suffix;
+    try {
+        console.info(line);
+    } catch(e) {}
+    try {
+        ipc.send("log", "info", line);
+    } catch(e) {}
+};
+
 const settingsDir = edex.paths.userData;
 const themesDir = edex.paths.themes;
 const keyboardsDir = edex.paths.keyboards;
@@ -146,6 +160,13 @@ window.defaultLauncherRailSettings = () => ({
     compact: false,
     labels: true,
     autoHide: true
+});
+
+window.defaultUpdateSettings = () => ({
+    enabled: true,
+    checkOnStartup: true,
+    autoDownload: true,
+    installOnQuit: true
 });
 
 window.defaultAiSettings = () => ({
@@ -309,6 +330,17 @@ window.normalizeAiSettings = ai => {
     return next;
 };
 
+window.normalizeUpdateSettings = updates => {
+    const defaults = window.defaultUpdateSettings();
+    const source = updates && typeof updates === "object" && !Array.isArray(updates) ? updates : {};
+    return {
+        enabled: source.enabled !== false,
+        checkOnStartup: source.checkOnStartup !== false,
+        autoDownload: source.autoDownload !== false,
+        installOnQuit: source.installOnQuit !== false
+    };
+};
+
 window.normalizeRevivalSettings = () => {
     const validPresets = Object.keys(window.revivalLayoutPresets());
     if (!validPresets.includes(window.settings.layoutPreset)) window.settings.layoutPreset = "classic";
@@ -330,6 +362,7 @@ window.normalizeRevivalSettings = () => {
     }
     if (!window.settings.plugins) window.settings.plugins = {enabled: true, paths: [], disabled: [], errors: {}, permissions: {}};
     if (!window.settings.plugins.errors) window.settings.plugins.errors = {};
+    window.settings.updates = window.normalizeUpdateSettings(window.settings.updates);
     window.settings.ai = window.normalizeAiSettings(window.settings.ai);
     window.settings.ssh = window.normalizeSshSettings(window.settings.ssh);
     return window.settings;
@@ -338,15 +371,31 @@ window.normalizeRevivalSettings = () => {
 window.normalizeSshSettings = ssh => {
     const next = Object.assign({profiles: [], lastProfileId: ""}, ssh || {});
     if (!Array.isArray(next.profiles)) next.profiles = [];
+    const number = (value, fallback, min, max) => {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed)) return fallback;
+        return Math.max(min, Math.min(max, Math.round(parsed)));
+    };
+    const enumValue = (value, allowed, fallback) => allowed.includes(value) ? value : fallback;
     next.profiles = next.profiles.map((profile, index) => ({
         id: String(profile && profile.id || `ssh-${index + 1}`),
         name: String(profile && profile.name || ""),
         host: String(profile && profile.host || ""),
         user: String(profile && profile.user || ""),
-        port: Number(profile && profile.port) || 22,
+        port: number(profile && profile.port, 22, 1, 65535),
         keyPath: String(profile && profile.keyPath || ""),
         remoteCwd: String(profile && profile.remoteCwd || ""),
-        extraArgs: String(profile && profile.extraArgs || "")
+        extraArgs: String(profile && profile.extraArgs || ""),
+        authMode: enumValue(String(profile && profile.authMode || "default"), ["default", "password", "publickey", "keyboard-interactive"], "default"),
+        hostKeyPolicy: enumValue(String(profile && profile.hostKeyPolicy || "default"), ["default", "accept-new", "yes", "no"], "default"),
+        keepAlive: profile && typeof profile.keepAlive === "boolean" ? profile.keepAlive : true,
+        keepAliveInterval: number(profile && profile.keepAliveInterval, 60, 0, 3600),
+        keepAliveCountMax: number(profile && profile.keepAliveCountMax, 3, 1, 20),
+        connectTimeout: number(profile && profile.connectTimeout, 15, 0, 300),
+        forwardAgent: !!(profile && profile.forwardAgent),
+        identitiesOnly: !!(profile && profile.identitiesOnly),
+        addKeysToAgent: !!(profile && profile.addKeysToAgent),
+        compression: !!(profile && profile.compression)
     })).filter(profile => profile.host || profile.name || profile.user || profile.keyPath);
     if (!next.profiles.some(profile => profile.id === next.lastProfileId)) next.lastProfileId = next.profiles[0] ? next.profiles[0].id : "";
     return next;
@@ -802,31 +851,79 @@ window.applyLayoutPresetClasses = () => {
     document.body.classList.toggle("launcher-header-enabled", rail.enabled !== false);
 };
 
+window.pendingLauncherAction = "";
+window.devCockpitReady = false;
+window.devCockpitInitError = "";
+
+window.devActionOrDefer = (action, fnName) => {
+    window.edexDebugLog("launcher", "developer action requested", {
+        action,
+        fnName,
+        available: typeof window[fnName] === "function",
+        cockpitReady: window.devCockpitReady,
+        cockpitError: !!window.devCockpitInitError
+    });
+    if (typeof window[fnName] === "function") return window[fnName]();
+    if (window.devCockpitInitError) {
+        if (typeof Modal !== "undefined") {
+            new Modal({type: "warning", title: "Developer Cockpit", message: window._escapeHtml(window.devCockpitInitError)});
+        }
+        return false;
+    }
+    if (window.devCockpitReady) {
+        if (typeof Modal !== "undefined") {
+            new Modal({type: "warning", title: "Developer Cockpit", message: "Developer action is unavailable."});
+        }
+        return false;
+    }
+    window.pendingLauncherAction = action;
+    return false;
+};
+
+window.flushPendingLauncherAction = () => {
+    const action = window.pendingLauncherAction;
+    if (!action) return false;
+    window.pendingLauncherAction = "";
+    window.edexDebugLog("launcher", "flushing pending action", {action});
+    return window.openLauncherAction(action);
+};
+
 window.openLauncherAction = action => {
-    switch(action) {
-        case "settings":
-            return window.openSettings && window.openSettings();
-        case "widgets":
-            return window.openWidgetVisibility && window.openWidgetVisibility();
-        case "explorer":
-            if (window.fsDisp && window.fsDisp.setSurfaceMode) return window.fsDisp.setSurfaceMode("window");
-            return false;
-        case "diagnostics":
-            return window.openDevDiagnostics && window.openDevDiagnostics();
-        case "editor":
-            return window.openDevEditor && window.openDevEditor();
-        case "ssh":
-            return window.openDevSshClient && window.openDevSshClient();
-        case "errorfix":
-            return window.openErrorToFixFlow && window.openErrorToFixFlow();
-        case "network":
-            return window.openDevNetworkLens && window.openDevNetworkLens();
-        case "layout":
-            return window.openDevLayoutEditor && window.openDevLayoutEditor();
-        case "theme":
-            return window.openDevThemeEditor && window.openDevThemeEditor();
-        default:
-            return false;
+    try {
+        window.edexDebugLog("launcher", "action clicked", {action});
+        switch(action) {
+            case "settings":
+                return window.openSettings && window.openSettings();
+            case "widgets":
+                return window.openWidgetVisibility && window.openWidgetVisibility();
+            case "explorer":
+                if (window.fsDisp && window.fsDisp.setSurfaceMode) return window.fsDisp.setSurfaceMode("window");
+                window.pendingLauncherAction = action;
+                return false;
+            case "diagnostics":
+                return window.devActionOrDefer(action, "openDevDiagnostics");
+            case "editor":
+                return window.devActionOrDefer(action, "openDevEditor");
+            case "ssh":
+                return window.devActionOrDefer(action, "openDevSshClient");
+            case "errorfix":
+                return window.devActionOrDefer(action, "openErrorToFixFlow");
+            case "network":
+                return window.devActionOrDefer(action, "openDevNetworkLens");
+            case "layout":
+                return window.devActionOrDefer(action, "openDevLayoutEditor");
+            case "theme":
+                return window.devActionOrDefer(action, "openDevThemeEditor");
+            default:
+                return false;
+        }
+    } catch(error) {
+        console.error(`Launcher action "${action}" failed`, error);
+        window.edexDebugLog("launcher", "action failed", {action, error: error.message || String(error)});
+        if (typeof Modal !== "undefined") {
+            new Modal({type: "warning", title: "Launcher", message: window._escapeHtml(error.message || String(error))});
+        }
+        return false;
     }
 };
 
@@ -962,7 +1059,17 @@ async function initUI() {
 
     // Initialize modules
     window.mods = {};
-    window.devCockpit = new DevCockpit();
+    try {
+        window.edexDebugLog("dev-cockpit", "initializing");
+        window.devCockpit = new DevCockpit();
+        window.devCockpitReady = true;
+        window.edexDebugLog("dev-cockpit", "ready");
+        window.flushPendingLauncherAction();
+    } catch(error) {
+        window.devCockpitInitError = error.message || String(error);
+        console.error("Unable to initialize Developer Cockpit", error);
+        window.edexDebugLog("dev-cockpit", "init failed", {error: window.devCockpitInitError});
+    }
 
     // Left column
     window.mods.clock = new Clock("mod_column_left");
@@ -1414,8 +1521,31 @@ window.remakeKeyboard = layout => {
 };
 
 window.shellTabLabel = (number, label) => {
-    const close = number > 0 ? `<button type="button" class="shell_tab_close" title="Close terminal tab" onclick="event.stopPropagation();window.closeShellTab(${number});">X</button>` : "";
+    const close = number > 0 ? `<button type="button" class="shell_tab_close" title="Close terminal tab" aria-label="Close terminal tab" onclick="event.stopPropagation();window.closeShellTab(${number});">X</button>` : "";
     return `<p>${window._escapeHtml(String(label || ""))}</p>${close}`;
+};
+
+window.resetShellTab = (number, focusFallback) => {
+    if (number <= 0 || !window.term) return false;
+    const terminal = window.term[number];
+    try {
+        if (terminal && terminal.term && !terminal.term._isDisposed) terminal.term.dispose();
+    } catch(e) {}
+    delete window.term[number];
+    const tab = document.getElementById("shell_tab"+number);
+    const pane = document.getElementById("terminal"+number);
+    if (tab) {
+        tab.setAttribute("class", "");
+        tab.innerHTML = window.shellTabLabel(number, "EMPTY");
+    }
+    if (pane) {
+        pane.setAttribute("class", "");
+        pane.innerHTML = "";
+    }
+    if (focusFallback !== false && window.currentTerm === number) {
+        window.useAppShortcut("PREVIOUS_TAB");
+    }
+    return true;
 };
 
 window.closeShellTab = number => {
@@ -1425,7 +1555,7 @@ window.closeShellTab = number => {
     if (processName && !window.confirm(`Close terminal #${number + 1} running ${processName}?`)) return false;
     try {
         if (terminal.socket && terminal.socket.readyState <= 1) terminal.socket.close(1000, "closed by user");
-        else if (terminal.term) terminal.term.dispose();
+        else window.resetShellTab(number);
     } catch(e) {}
     return true;
 };
@@ -1471,11 +1601,7 @@ window.focusShellTab = number => {
 
                 window.term[number].onclose = e => {
                     delete window.term[number].onprocesschange;
-                    document.getElementById("shell_tab"+number).innerHTML = window.shellTabLabel(number, "EMPTY");
-                    document.getElementById("terminal"+number).innerHTML = "";
-                    window.term[number].term.dispose();
-                    delete window.term[number];
-                    window.useAppShortcut("PREVIOUS_TAB");
+                    window.resetShellTab(number);
                 };
 
                 window.term[number].onprocesschange = p => {
@@ -1535,6 +1661,7 @@ window.openSettings = async () => {
     let terminalStyle = window.settings.terminalStyle || {};
     let launcherRailSettings = Object.assign(window.defaultLauncherRailSettings(), window.settings.launcherRail || {});
     let performanceSettings = window.performanceSettings();
+    let updateSettings = window.normalizeUpdateSettings(window.settings.updates || {});
 
     // Unlink the tactile keyboard from the terminal emulator to allow filling in the settings fields
     window.keyboard.detach();
@@ -1999,6 +2126,38 @@ window.openSettings = async () => {
                             <option>${window.settings.launchOnStartup !== true}</option>
                         </select></td>
                     </tr>
+                    <tr>
+                        <td>updates.enabled</td>
+                        <td>Check GitHub release metadata and use native packaged updates when available</td>
+                        <td><select id="settingsEditor-updates-enabled">
+                            <option>${updateSettings.enabled === true}</option>
+                            <option>${updateSettings.enabled !== true}</option>
+                        </select></td>
+                    </tr>
+                    <tr>
+                        <td>updates.checkOnStartup</td>
+                        <td>Check for updates after startup</td>
+                        <td><select id="settingsEditor-updates-checkOnStartup">
+                            <option>${updateSettings.checkOnStartup === true}</option>
+                            <option>${updateSettings.checkOnStartup !== true}</option>
+                        </select></td>
+                    </tr>
+                    <tr>
+                        <td>updates.autoDownload</td>
+                        <td>Download packaged updates in the background after they are found</td>
+                        <td><select id="settingsEditor-updates-autoDownload">
+                            <option>${updateSettings.autoDownload === true}</option>
+                            <option>${updateSettings.autoDownload !== true}</option>
+                        </select></td>
+                    </tr>
+                    <tr>
+                        <td>updates.installOnQuit</td>
+                        <td>Install a downloaded update automatically when eDEX exits</td>
+                        <td><select id="settingsEditor-updates-installOnQuit">
+                            <option>${updateSettings.installOnQuit === true}</option>
+                            <option>${updateSettings.installOnQuit !== true}</option>
+                        </select></td>
+                    </tr>
                     <tr${aiSettingsHidden}>
                         <td>ai.enabled</td>
                         <td>Enable Error to Fix prompt handoff</td>
@@ -2237,6 +2396,7 @@ window.settingsSectionForKey = key => {
     if (/^editor\./.test(key)) return "editor";
     if (/^ai\./.test(key)) return "ai";
     if (/^widgets\./.test(key)) return "widgets";
+    if (/^updates\./.test(key)) return "updates";
     if (/^privacy\./.test(key)) return "privacy";
     if (/^performance\./.test(key)) return "performance";
     if (/^theme$|^layoutPreset$|^launcherRail\.|^keyboard$|^monitor$|^clockHours$|^nointro$|^nocursor$|^allowWindowed$|^keepGeometry$/.test(key)) return "appearance";
@@ -2258,6 +2418,7 @@ window.enhanceSettingsEditor = () => {
         ["explorer", "File Explorer"],
         ["editor", "Editor"],
         ["widgets", "Widgets"],
+        ["updates", "Updates"],
         ["privacy", "Privacy"],
         ["performance", "Performance"],
         ["network", "Network"],
@@ -2427,6 +2588,10 @@ window.settingsEditorDefaults = () => Object.assign({
     "terminalStyle.foreground": "",
     "terminalStyle.background": "",
     "terminal.showStartupBanner": true,
+    "updates.enabled": true,
+    "updates.checkOnStartup": true,
+    "updates.autoDownload": true,
+    "updates.installOnQuit": true,
     audio: true,
     audioVolume: 1,
     disableFeedbackAudio: false,
@@ -2743,6 +2908,12 @@ window.writeSettingsFile = () => {
         iface: document.getElementById("settingsEditor-iface").value,
         allowWindowed: (document.getElementById("settingsEditor-allowWindowed").value === "true"),
         launchOnStartup: (document.getElementById("settingsEditor-launchOnStartup").value === "true"),
+        updates: {
+            enabled: (document.getElementById("settingsEditor-updates-enabled").value === "true"),
+            checkOnStartup: (document.getElementById("settingsEditor-updates-checkOnStartup").value === "true"),
+            autoDownload: (document.getElementById("settingsEditor-updates-autoDownload").value === "true"),
+            installOnQuit: (document.getElementById("settingsEditor-updates-installOnQuit").value === "true")
+        },
         ai: {
             enabled: (document.getElementById("settingsEditor-ai-enabled").value === "true"),
             provider: document.getElementById("settingsEditor-ai-defaultProvider").value,
@@ -3042,6 +3213,7 @@ window.registerKeyboardShortcuts = () => {
     window.shortcuts.forEach(cut => {
         if (!cut.enabled) return;
         if (cut.type === "app") {
+            if (cut.action === "COPY" || cut.action === "PASTE") return;
             if (cut.action === "TAB_X") {
                 for (let i = 1; i <= 5; i++) {
                     let trigger = cut.trigger.replace("X", i);
@@ -3076,6 +3248,31 @@ window.addEventListener("blur", () => {
 
 // Prevent showing menu, exiting fullscreen or app with keyboard shortcuts
 document.addEventListener("keydown", e => {
+    const target = e.target;
+    const isXtermHelper = target && target.classList && target.classList.contains("xterm-helper-textarea");
+    const isEditableTarget = target && target.closest && target.closest("input, textarea, select, button, [contenteditable='true'], .dev_window, .modal_popup, #filesystem");
+    if (!isEditableTarget || isXtermHelper) {
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === "KeyC") {
+            e.preventDefault();
+            window.useAppShortcut("COPY");
+            return;
+        }
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === "KeyV") {
+            e.preventDefault();
+            window.useAppShortcut("PASTE");
+            return;
+        }
+        if ((e.ctrlKey || e.metaKey) && e.code === "Insert") {
+            e.preventDefault();
+            window.useAppShortcut("COPY");
+            return;
+        }
+        if (e.shiftKey && e.code === "Insert") {
+            e.preventDefault();
+            window.useAppShortcut("PASTE");
+            return;
+        }
+    }
     if (e.key === "Alt") {
         e.preventDefault();
     }

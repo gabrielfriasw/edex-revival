@@ -32,6 +32,7 @@ This file is the execution checkpoint for the Revival work. Always read it befor
 - [x] Settings Center can preview a selected theme before saving/reloading.
 - [x] Settings Center can reset the active section to defaults before saving.
 - [x] Settings Center can export profiles and import profiles with an automatic backup.
+- [x] Packaged builds use native auto-update flow with background download, progress UI, and restart/install action.
 - [x] Explorer supports Ctrl-click, Shift-click, Ctrl+A, multi-selection status, multi-selection inspector, and batch duplicate/copy/move/trash/path copy.
 - [x] Explorer supports drag-and-drop copy by default, move with Shift, folder/pane drop targets, and external file drops when Electron exposes file paths.
 - [x] Explorer persists tabs and active tab path under `devExplorer`.
@@ -43,7 +44,7 @@ This file is the execution checkpoint for the Revival work. Always read it befor
 - [x] Editor workbench adds VS Code-style quick open, project-wide search, multi-file tabs, and split panes.
 - [x] Editor IDE includes a readable VS Code-style file sidebar with icons, filtering, refresh, collapse, and toggle.
 - [x] Layout presets, auto-hide launcher header, Revival themes, smart editor open behavior, globe modes, shell test, plugin docs/examples, and Revival release docs are in place.
-- [x] Native SSH profiles open terminal tabs without storing passwords.
+- [x] Native SSH profiles open terminal tabs without storing passwords and include keepalive/auth/key-agent controls plus guided key setup and key-login diagnostics.
 - [x] Error to Fix turns the latest terminal diagnostic into an editable Codex/Claude prompt when AI is enabled.
 
 ## Phase 1: Base, Security, Stability
@@ -58,7 +59,7 @@ This file is the execution checkpoint for the Revival work. Always read it befor
 ## Phase 2: File Explorer
 
 - [x] Provide Windows Explorer/Dolphin basics: file list, double-click folder open, right-click menu, open file, refresh, up/back/forward.
-- [x] Provide dock/window/cockpit surfaces with window drag/resize.
+- [x] Provide dock/window/cockpit surfaces with window drag/resize, edge resizing, and clearer window controls.
 - [x] Keep dock mode calm: breadcrumb, search, dense file list.
 - [x] Add operations: new file/folder, rename, duplicate, copy, move, trash, copy path, WSL path, open external, terminal here.
 - [x] Add views: list, grid, columns, dual pane.
@@ -87,7 +88,7 @@ This file is the execution checkpoint for the Revival work. Always read it befor
 
 - [x] Add an accessible Settings launcher.
 - [x] Organize settings into tabs.
-- [x] Expose theme, terminal colors, explorer, editor, AI, startup, and widget basics.
+- [x] Expose theme, terminal colors, explorer, editor, AI, updates, startup, and widget basics.
 - [x] Expose per-widget controls directly in Settings Center.
 - [x] Expose privacy toggles for IP, interface, and geolocation.
 - [x] Add theme preview before reload.
@@ -102,7 +103,7 @@ This file is the execution checkpoint for the Revival work. Always read it befor
 - [x] Allow hiding interface and geolocation independently.
 - [x] Move Settings/Widgets launchers away from network status.
 - [x] Add layout presets: Classic, Minimal, Developer, Privacy, Cinematic.
-- [ ] Persist window positions/layout presets for internal windows.
+- [x] Persist window positions/layout presets for internal windows.
 - [x] Add a compact launcher header that avoids keyboard, side panels, and network widgets at all supported sizes.
 
 ## Phase 6: Terminal and Shell
@@ -113,8 +114,8 @@ This file is the execution checkpoint for the Revival work. Always read it befor
 - [x] Avoid unsupported-OS cwd tracking errors becoming noisy failures.
 - [x] Improve cwd detection for PowerShell, Git Bash, WSL, cmd, and Linux shells.
 - [x] Add Settings UI for shell args/env/cwd with validation and test button.
-- [x] Improve copy/paste, selection behavior, and multi-tab close flow.
-- [x] Add a lightweight SSH Client that launches native `ssh` commands in terminal tabs.
+- [x] Improve terminal-local copy/paste, selection behavior, and multi-tab close flow.
+- [x] Add a lightweight SSH Client that launches native `ssh` commands with keepalive/auth controls, guided key setup, and key-login diagnostics in terminal tabs.
 
 ## Phase 7: Visual Sci-Fi Polish
 
@@ -155,6 +156,7 @@ This file is the execution checkpoint for the Revival work. Always read it befor
 - [x] Keep `npm start` intro-friendly.
 - [x] Review Windows packaging after Revival changes.
 - [x] Add Revival changelog and release notes.
+- [x] Add packaged auto-update download/install flow through Electron Builder metadata.
 - [x] Add contribution guide for bugs/features/screenshots.
 - [x] Add issue templates for visual, explorer, terminal, settings, performance, and packaging bugs.
 

@@ -94,6 +94,12 @@ const defaultSettings = {
         disableBackgroundThrottling: true,
         enableErrorLens: "ai-only"
     },
+    updates: {
+        enabled: true,
+        checkOnStartup: true,
+        autoDownload: true,
+        installOnQuit: true
+    },
     terminalStyle: {
         foreground: "",
         background: ""
@@ -159,6 +165,179 @@ function readSettingsFile() {
 
 function isTrustedSender(event) {
     return win && event.sender === win.webContents;
+}
+
+const updateState = {
+    status: "idle",
+    supported: false,
+    checking: false,
+    downloading: false,
+    downloaded: false,
+    progress: 0,
+    version: "",
+    releaseName: "",
+    releaseDate: "",
+    error: "",
+    updatedAt: Date.now()
+};
+let autoUpdater = null;
+let updateSettings = defaultSettings.updates;
+let updaterInitialized = false;
+
+function sanitizeUpdateInfo(info) {
+    if (!info || typeof info !== "object") return {};
+    return {
+        version: String(info.version || info.tag || ""),
+        releaseName: String(info.releaseName || info.name || ""),
+        releaseDate: String(info.releaseDate || ""),
+        releaseNotes: typeof info.releaseNotes === "string" ? info.releaseNotes.slice(0, 4000) : ""
+    };
+}
+
+function publishUpdateState(patch) {
+    Object.assign(updateState, patch || {}, {updatedAt: Date.now()});
+    if (win && !win.webContents.isDestroyed()) {
+        win.webContents.send("edex:update-event", Object.assign({}, updateState));
+    }
+    return Object.assign({}, updateState);
+}
+
+function updaterLogger() {
+    return {
+        info: message => signale.info(`UpdateChecker: ${message}`),
+        warn: message => signale.warn(`UpdateChecker: ${message}`),
+        error: message => signale.error(`UpdateChecker: ${message}`),
+        debug: message => signale.debug(`UpdateChecker: ${message}`)
+    };
+}
+
+function configureAutoUpdater(settings) {
+    updateSettings = mergeSettingsDefaults(Object.assign({}, settings && settings.updates || {}), defaultSettings.updates);
+    if (updaterInitialized) return;
+    updaterInitialized = true;
+
+    if (updateSettings.enabled === false) {
+        publishUpdateState({status: "disabled", supported: false});
+        signale.info("UpdateChecker: Automatic updates disabled in settings.");
+        return;
+    }
+
+    if (!app.isPackaged) {
+        publishUpdateState({
+            status: "unsupported",
+            supported: false,
+            error: "Automatic updates are available only in packaged builds."
+        });
+        signale.info("UpdateChecker: Automatic updates unavailable in development mode.");
+        return;
+    }
+
+    try {
+        autoUpdater = require("electron-updater").autoUpdater;
+        autoUpdater.logger = updaterLogger();
+        autoUpdater.autoDownload = updateSettings.autoDownload !== false;
+        autoUpdater.autoInstallOnAppQuit = updateSettings.installOnQuit !== false;
+        autoUpdater.autoRunAppAfterInstall = true;
+        publishUpdateState({status: "idle", supported: true, error: ""});
+
+        autoUpdater.on("checking-for-update", () => {
+            publishUpdateState({status: "checking", checking: true, error: ""});
+        });
+        autoUpdater.on("update-available", info => {
+            publishUpdateState(Object.assign({
+                status: autoUpdater.autoDownload ? "downloading" : "available",
+                checking: false,
+                downloading: !!autoUpdater.autoDownload,
+                downloaded: false,
+                progress: 0,
+                error: ""
+            }, sanitizeUpdateInfo(info)));
+        });
+        autoUpdater.on("update-not-available", info => {
+            publishUpdateState(Object.assign({
+                status: "latest",
+                checking: false,
+                downloading: false,
+                downloaded: false,
+                progress: 0,
+                error: ""
+            }, sanitizeUpdateInfo(info)));
+            signale.info("UpdateChecker: Running latest version.");
+        });
+        autoUpdater.on("download-progress", progress => {
+            publishUpdateState({
+                status: "downloading",
+                checking: false,
+                downloading: true,
+                downloaded: false,
+                progress: Math.max(0, Math.min(100, Number(progress.percent) || 0))
+            });
+        });
+        autoUpdater.on("update-downloaded", info => {
+            publishUpdateState(Object.assign({
+                status: "downloaded",
+                checking: false,
+                downloading: false,
+                downloaded: true,
+                progress: 100,
+                error: ""
+            }, sanitizeUpdateInfo(info)));
+        });
+        autoUpdater.on("error", error => {
+            publishUpdateState({
+                status: "error",
+                checking: false,
+                downloading: false,
+                error: error && error.message ? error.message : String(error || "Unknown update error")
+            });
+        });
+        autoUpdater.on("update-cancelled", info => {
+            publishUpdateState(Object.assign({
+                status: "cancelled",
+                checking: false,
+                downloading: false,
+                error: ""
+            }, sanitizeUpdateInfo(info)));
+        });
+
+        if (updateSettings.checkOnStartup !== false) {
+            setTimeout(() => checkForUpdates(false).catch(error => {
+                signale.warn(`UpdateChecker: Startup check failed: ${error.message || error}`);
+            }), 4500);
+        }
+    } catch(error) {
+        publishUpdateState({
+            status: "unsupported",
+            supported: false,
+            error: error.message || String(error)
+        });
+        signale.warn(`UpdateChecker: Automatic updater unavailable: ${error.message || error}`);
+    }
+}
+
+async function checkForUpdates(userInitiated) {
+    if (!autoUpdater) {
+        return publishUpdateState({
+            status: updateSettings.enabled === false ? "disabled" : "unsupported",
+            supported: false
+        });
+    }
+    publishUpdateState({status: "checking", checking: true, error: userInitiated ? "" : updateState.error});
+    await autoUpdater.checkForUpdates();
+    return Object.assign({}, updateState);
+}
+
+async function downloadUpdate() {
+    if (!autoUpdater) return publishUpdateState({status: "unsupported", supported: false});
+    publishUpdateState({status: "downloading", downloading: true, error: ""});
+    await autoUpdater.downloadUpdate();
+    return Object.assign({}, updateState);
+}
+
+function installDownloadedUpdate() {
+    if (!autoUpdater || !updateState.downloaded) return false;
+    autoUpdater.quitAndInstall(false, true);
+    return true;
 }
 
 function isSafeExternalURL(value) {
@@ -277,6 +456,26 @@ ipc.on("edex:screen-sync", (event, action) => {
         return;
     }
     event.returnValue = action === "getAllDisplays" ? screen.getAllDisplays() : [];
+});
+
+ipc.handle("edex:updates-state", event => {
+    if (!isTrustedSender(event)) return null;
+    return Object.assign({}, updateState);
+});
+
+ipc.handle("edex:updates-check", async event => {
+    if (!isTrustedSender(event)) return null;
+    return checkForUpdates(true);
+});
+
+ipc.handle("edex:updates-download", async event => {
+    if (!isTrustedSender(event)) return null;
+    return downloadUpdate();
+});
+
+ipc.handle("edex:updates-install", event => {
+    if (!isTrustedSender(event)) return false;
+    return installDownloadedUpdate();
 });
 
 ipc.on("edex:global-shortcut-register", (event, id, accelerator) => {
@@ -582,6 +781,7 @@ app.on('ready', async () => {
     });
 
     createWindow(settings);
+    configureAutoUpdater(settings);
 
     // Support for more terminals, used for creating tabs (currently limited to 4 extra terms)
     extraTtys = {};

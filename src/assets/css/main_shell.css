@@ -63,6 +63,7 @@ ul#main_shell_tabs {
 ul#main_shell_tabs > li {
     cursor: pointer;
     display: block;
+    position: relative;
     font-family: var(--font_main);
     font-weight: normal;
     width: 100%;
@@ -78,9 +79,10 @@ ul#main_shell_tabs > li > p {
     margin: 0;
     transform: skewX(-35deg);
     overflow: hidden;
+    background: var(--color_light_black);
     text-overflow: ellipsis;
     white-space: nowrap;
-    padding: 0 1.6vh;
+    padding: 0 2.2vh 0 1.6vh;
 }
 
 ul#main_shell_tabs > li > button.shell_tab_close {
@@ -99,6 +101,7 @@ ul#main_shell_tabs > li > button.shell_tab_close {
     line-height: 1.2vh;
     transform: skewX(-35deg);
     cursor: pointer;
+    z-index: 2;
 }
 
 ul#main_shell_tabs > li > button.shell_tab_close:hover {
@@ -113,7 +116,7 @@ ul#main_shell_tabs > li.active {
     color: var(--color_light_black);
     font-weight: bold;
     transform: skewX(35deg) scale(1.2);
-    z-index: -1;
+    z-index: 1;
 }
 
 div#main_shell_innercontainer, div#main_shell_innercontainer pre {
@@ -121,6 +124,7 @@ div#main_shell_innercontainer, div#main_shell_innercontainer pre {
     width: 100%;
     margin: 0vh;
     overflow: hidden;
+    background: var(--color_light_black);
 }
 
 div#main_shell_innercontainer pre {
@@ -156,6 +160,7 @@ div#main_shell_innercontainer pre#terminal4 {
     top: 0;
     bottom: 0;
     padding-bottom: 10px;
+    background: var(--color_light_black);
 }
 
 .xterm {
@@ -164,6 +169,7 @@ div#main_shell_innercontainer pre#terminal4 {
     position: relative;
     user-select: none;
     -webkit-user-select: none;
+    background: var(--color_light_black);
 }
 
 .xterm.focus,
