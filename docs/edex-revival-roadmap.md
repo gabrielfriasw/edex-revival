@@ -50,6 +50,7 @@ This file is the execution checkpoint for the Revival work. Always read it befor
 - [x] Settings Center includes a Spotify setup guide for Web API selection, loopback Redirect URI, scopes, and no-Client-Secret PKCE configuration.
 - [x] Widget Visibility supports drag-and-drop ordering between left and right widget columns.
 - [x] Widget columns apply adaptive density states so Spotify can expand into available space, including fullscreen focus mode.
+- [x] Dual monitor mode can open a dedicated secondary display with Spotify, widgets, terminal, or blank content and portrait/landscape layout selection.
 
 ## Phase 1: Base, Security, Stability
 
@@ -111,6 +112,7 @@ This file is the execution checkpoint for the Revival work. Always read it befor
 - [x] Add a compact launcher header that avoids keyboard, side panels, and network widgets at all supported sizes.
 - [x] Add drag-and-drop widget ordering and persisted widget column layout.
 - [x] Add adaptive widget sizing for sparse columns and Spotify fullscreen focus mode.
+- [x] Add dual monitor secondary display mode with configurable monitor, content, orientation, and fullscreen behavior.
 
 ## Phase 6: Terminal and Shell
 

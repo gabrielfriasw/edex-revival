@@ -9,7 +9,7 @@
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-GPL--3.0-blue?style=for-the-badge"></a>
   <img alt="Windows" src="https://img.shields.io/badge/windows-primary-00d4ff?style=for-the-badge">
   <img alt="Linux" src="https://img.shields.io/badge/linux-supported-39ff88?style=for-the-badge">
-  <img alt="Version" src="https://img.shields.io/badge/revival-1.0.3-9cf?style=for-the-badge">
+  <img alt="Version" src="https://img.shields.io/badge/revival-1.0.4-9cf?style=for-the-badge">
 </p>
 
 eDEX Revival is a revived sci-fi terminal, system monitor, file cockpit, lightweight editor, SSH launcher, and local developer cockpit.
@@ -24,11 +24,12 @@ It is a fork and continuation of the original [eDEX-UI](https://github.com/GitSq
 
 - Modernized Electron runtime and packaging for current Windows and Linux builds.
 - Revival layout presets: Classic, Minimal, Developer, Privacy, and Cinematic.
-- Auto-hide top launcher for Settings, Widgets, Explorer, Diagnostics, Editor, SSH, Network Lens, Theme Tools, and Layout Tools.
+- Auto-hide top launcher for Settings, Widgets, Explorer, Diagnostics, Editor, SSH, and Network Lens.
+- Dual monitor mode with a configurable secondary display for Spotify focus, widgets, terminal, or a blank stage, including portrait/landscape intent and fullscreen startup.
 - File Operations Cockpit with explorer, preview, Git-aware actions, batch operations, terminal-here flow, and resizable internal windows.
 - Lightweight editor workbench with tabs, file sidebar, search, split view, save states, and safer file-open behavior.
 - Native SSH profile client that opens sessions in terminal tabs without storing passwords, with guided SSH key setup and keepalive controls.
-- Spotify Connect widget with user-owned Web API setup, PKCE OAuth, encrypted token storage when available, album art, playback controls, adaptive layout, and fullscreen focus mode.
+- Spotify Connect widget with user-owned Web API setup, PKCE OAuth, encrypted token storage when available, album art, playback controls, adaptive layout, fullscreen focus mode, and optional routing to the secondary monitor.
 - Native packaged update flow with background download, progress UI, restart/install action, and Settings controls.
 - Terminal diagnostics and optional Error to Fix handoff for Codex or Claude CLI.
 - Privacy controls for IP, interface name, geolocation, and globe/network modes.

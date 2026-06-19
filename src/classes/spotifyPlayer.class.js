@@ -71,6 +71,10 @@ class SpotifyPlayer {
         return `<button type="button" class="${className}" title="${this.escape(title || label || action)}" data-spotify-action="${this.escape(action)}">${this.icon(icon)}${text}</button>`;
     }
 
+    asciiTitleMaxChars() {
+        return this.fullscreen ? 20 : 16;
+    }
+
     asciiTitle(value) {
         const font = {
             "A": [" ## ", "#  #", "####", "#  #", "#  #"],
@@ -115,6 +119,7 @@ class SpotifyPlayer {
             ".": [" ", " ", " ", " ", "#"],
             "&": [" ## ", "# # ", " #  ", "# # ", " ## "]
         };
+        const maxChars = this.asciiTitleMaxChars();
         const clean = String(value || "NO SIGNAL")
             .normalize("NFD")
             .replace(/[\u0300-\u036f]/g, "")
@@ -122,7 +127,7 @@ class SpotifyPlayer {
             .replace(/[^A-Z0-9 &_\-.]/g, " ")
             .replace(/\s+/g, " ")
             .trim()
-            .slice(0, 16) || "NO SIGNAL";
+            .slice(0, maxChars) || "NO SIGNAL";
         const rows = ["", "", "", "", ""];
         clean.split("").forEach(char => {
             const glyph = font[char] || font[" "];

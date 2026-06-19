@@ -262,8 +262,8 @@ h6#settingsEditorStatus {
 }
 
 div.modal_popup:has(#settingsEditorShell) {
-    width: 78vw;
-    max-width: 78vw;
+    width: 80vw;
+    max-width: 80vw;
     max-height: 84vh;
     justify-content: flex-start;
 }
@@ -278,7 +278,7 @@ div#settingsEditorShell {
 
 .settings_editor_quickbar {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) repeat(6, max-content);
+    grid-template-columns: minmax(180px, 1fr) minmax(180px, 280px) max-content max-content max-content;
     gap: 0.8vw;
     align-items: center;
     padding: 0.8vh;
@@ -303,14 +303,73 @@ div#settingsEditorShell {
 }
 
 .settings_editor_quickbar button,
-.settings_editor_tabs button {
+.settings_editor_tabs button,
+.settings_editor_more summary {
     margin-left: 0;
     border-radius: 0.25vh;
 }
 
+.settings_editor_quickbar button.primary {
+    background: rgba(var(--color_r), var(--color_g), var(--color_b), 0.28);
+}
+
+.settings_editor_quickbar input[type="search"] {
+    width: 100%;
+    min-width: 0;
+    height: 3vh;
+    box-sizing: border-box;
+    border: 0.12vh solid rgba(var(--color_r), var(--color_g), var(--color_b), 0.58);
+    background: rgba(0, 0, 0, 0.5);
+    color: rgb(var(--color_r), var(--color_g), var(--color_b));
+    font-family: var(--font_main);
+    font-size: 1.15vh;
+}
+
+.settings_editor_more {
+    position: relative;
+    min-width: 9vh;
+}
+
+.settings_editor_more summary {
+    height: 3vh;
+    display: grid;
+    place-items: center;
+    box-sizing: border-box;
+    padding: 0 1.2vh;
+    border: 0.12vh solid rgba(var(--color_r), var(--color_g), var(--color_b), 0.65);
+    background: rgba(0, 0, 0, 0.45);
+    color: rgb(var(--color_r), var(--color_g), var(--color_b));
+    font-family: var(--font_main);
+    font-size: 1.2vh;
+    cursor: pointer;
+    list-style: none;
+}
+
+.settings_editor_more summary::-webkit-details-marker {
+    display: none;
+}
+
+.settings_editor_more > div {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 0.45vh);
+    z-index: 20;
+    width: 18vh;
+    display: grid;
+    gap: 0.35vh;
+    padding: 0.55vh;
+    border: 0.12vh solid rgba(var(--color_r), var(--color_g), var(--color_b), 0.58);
+    background: rgba(0, 0, 0, 0.94);
+    box-shadow: 0 1vh 2vh rgba(0, 0, 0, 0.45);
+}
+
+.settings_editor_more > div button {
+    width: 100%;
+}
+
 .settings_editor_tabs {
     display: grid;
-    grid-template-columns: repeat(10, minmax(0, 1fr));
+    grid-template-columns: repeat(8, minmax(0, 1fr));
     gap: 0.35vw;
 }
 
@@ -582,11 +641,19 @@ h6#widgetVisibilityStatus {
 
 @media (max-width: 1100px), (max-height: 620px) {
     .settings_editor_tabs {
-        grid-template-columns: repeat(5, minmax(0, 1fr));
+        grid-template-columns: repeat(4, minmax(0, 1fr));
     }
 
     .settings_editor_quickbar {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .settings_editor_quickbar > div:first-child {
+        grid-column: 1 / -1;
+    }
+
+    .settings_editor_more {
+        min-width: 0;
     }
 
     .spotify_redirect_copy {

@@ -392,6 +392,7 @@ contextBridge.exposeInMainWorld("edex", {
         relaunch: () => ipcRenderer.send("edex:app-control", "relaunch")
     },
     appVersion: context.appVersion,
+    windowRole: context.windowRole || "primary",
     clipboard: {
         readText: () => clipboard.readText(),
         writeText: value => clipboard.writeText(String(value))
@@ -425,6 +426,10 @@ contextBridge.exposeInMainWorld("edex", {
     },
     diagnostics: {
         snapshot: () => ipcRenderer.invoke("edex:diagnostics-snapshot")
+    },
+    dualMonitor: {
+        state: () => ipcRenderer.invoke("edex:dual-monitor-state"),
+        apply: () => ipcRenderer.invoke("edex:dual-monitor-apply")
     },
     devfs: {
         readDir: (target, options) => ipcRenderer.invoke("edex:devfs-read-dir", target, options || {}),

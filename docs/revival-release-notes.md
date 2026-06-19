@@ -1,5 +1,55 @@
 # eDEX Revival Release Notes
 
+## v1.0.4
+
+Dual monitor, fullscreen startup, and Settings Center cleanup release.
+
+### Highlights
+
+- Added Dual Monitor Mode for systems with a second display.
+- The secondary monitor can now be configured for Spotify focus, widgets, terminal, or a blank stage.
+- Spotify remains the default secondary-monitor experience, with portrait and landscape intent available for vertical or horizontal displays.
+- Secondary windows now participate in the eDEX startup rhythm with boot/intro handling instead of jumping straight into the widget.
+- Fullscreen startup is stricter: force-fullscreen settings now take priority over saved window bounds.
+- When Spotify is assigned to the second monitor, the primary monitor removes the Spotify widget so the main cockpit stays cleaner.
+- Settings Center was reorganized into clearer groups with search, compact top actions, and a More menu so users are not dropped into a wall of buttons.
+- Launcher Theme Tools and Layout Tools were removed because their actions were redundant with Settings and presets.
+
+### Fixes
+
+- Fixed secondary Spotify focus mode so it sizes and stacks as a true display surface instead of a small or clipped window.
+- Fixed Spotify fullscreen title handling so ASCII-style playback text has more room and avoids clipping, including "NO ACTIVE PLAYBACK" states.
+- Fixed primary/secondary Spotify duplication when the secondary monitor owns the Spotify display.
+- Fixed fullscreen restore behavior that could let saved window state override explicit fullscreen startup.
+- Reduced Settings Center visual overload by removing duplicate bottom action buttons and consolidating secondary commands.
+
+### Compatibility Notes
+
+- Existing settings are merged forward on boot.
+- Dual Monitor Mode is disabled unless a secondary display is available and the setting is enabled.
+- Spotify on the secondary monitor still uses the existing user-owned Spotify Web API setup. No Client Secret is stored or required.
+- SSH passwords are still never stored, and AI controls remain hidden unless `ai.enabled` is explicitly true.
+- Windows and Linux remain the supported package targets for this release cycle.
+
+### Validation
+
+- `node --check` on touched JavaScript files.
+- `git diff --check`.
+- trailing whitespace scan.
+- `npm test`.
+- Windows package build.
+
+### Download
+
+Use the Windows installer attached to this release. Linux builds use the AppImage target:
+
+```text
+eDEX-Revival-Windows-x64.exe
+eDEX-Revival-Linux-x86_64.AppImage
+```
+
+Auto-update metadata is included as `latest.yml` and installer blockmap assets where generated.
+
 ## v1.0.3
 
 Spotify cockpit, widget layout, and fullscreen focus release.

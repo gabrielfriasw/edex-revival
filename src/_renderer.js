@@ -66,6 +66,11 @@ window.settings = require(settingsFile);
 window.shortcuts = require(shortcutsFile);
 window.lastWindowState = require(lastWindowStateFile);
 window.recoveryWarnings = Array.isArray(edex.recoveryWarnings) ? edex.recoveryWarnings.slice() : [];
+window.displayParams = new URLSearchParams(window.location.search || "");
+window.edexWindowRole = edex.windowRole || window.displayParams.get("display") || "primary";
+window.isSecondaryDisplay = window.edexWindowRole === "secondary";
+window.secondaryDisplayContent = window.displayParams.get("content") || "spotify";
+window.secondaryDisplayOrientation = window.displayParams.get("orientation") || "auto";
 
 window.revivalLayoutPresets = () => ({
     classic: {
@@ -205,6 +210,27 @@ window.normalizeSpotifySettings = spotify => {
     next.showAlbumArt = next.showAlbumArt !== false;
     next.showDevices = next.showDevices !== false;
     return next;
+};
+
+window.defaultDualMonitorSettings = () => ({
+    enabled: false,
+    display: "auto",
+    content: "spotify",
+    orientation: "auto",
+    fullscreen: true
+});
+
+window.normalizeDualMonitorSettings = dualMonitor => {
+    const defaults = window.defaultDualMonitorSettings();
+    const source = dualMonitor && typeof dualMonitor === "object" && !Array.isArray(dualMonitor) ? dualMonitor : {};
+    const display = source.display === "auto" ? "auto" : Number(source.display);
+    return {
+        enabled: source.enabled === true,
+        display: display === "auto" || (Number.isInteger(display) && display >= 0) ? display : defaults.display,
+        content: ["spotify", "widgets", "terminal", "blank"].includes(source.content) ? source.content : defaults.content,
+        orientation: ["auto", "landscape", "portrait"].includes(source.orientation) ? source.orientation : defaults.orientation,
+        fullscreen: source.fullscreen !== false
+    };
 };
 
 window.defaultPerformanceSettings = () => ({
@@ -391,6 +417,7 @@ window.normalizeRevivalSettings = () => {
     window.settings.updates = window.normalizeUpdateSettings(window.settings.updates);
     window.settings.ai = window.normalizeAiSettings(window.settings.ai);
     window.settings.spotify = window.normalizeSpotifySettings(window.settings.spotify);
+    window.settings.dualMonitor = window.normalizeDualMonitorSettings(window.settings.dualMonitor);
     window.settings.ssh = window.normalizeSshSettings(window.settings.ssh);
     return window.settings;
 };
@@ -700,7 +727,7 @@ function initSystemInformationProxy() {
 window.audioManager = new AudioManager();
 
 // See #223
-edex.app.focus();
+if (!window.isSecondaryDisplay) edex.app.focus();
 
 let i = 0;
 if (window.settings.nointro || window.settings.nointroOverride) {
@@ -708,7 +735,7 @@ if (window.settings.nointro || window.settings.nointroOverride) {
     initSystemInformationProxy();
     document.getElementById("boot_screen").remove();
     document.body.setAttribute("class", "");
-    waitForFonts().then(initUI);
+    waitForFonts().then(window.isSecondaryDisplay ? initSecondaryDisplayUI : initUI);
 } else {
     displayLine();
 }
@@ -817,7 +844,8 @@ async function displayTitleScreen() {
     initSystemInformationProxy();
     waitForFonts().then(() => {
         bootScreen.remove();
-        initUI();
+        if (window.isSecondaryDisplay) initSecondaryDisplayUI();
+        else initUI();
     });
 }
 
@@ -878,6 +906,142 @@ window.applyLayoutPresetClasses = () => {
     document.body.classList.toggle("launcher-header-enabled", rail.enabled !== false);
 };
 
+window.secondaryDisplayMode = () => {
+    const settings = window.normalizeDualMonitorSettings(window.settings.dualMonitor);
+    const content = ["spotify", "widgets", "terminal", "blank"].includes(window.secondaryDisplayContent)
+        ? window.secondaryDisplayContent
+        : settings.content;
+    const orientation = ["auto", "landscape", "portrait"].includes(window.secondaryDisplayOrientation)
+        ? window.secondaryDisplayOrientation
+        : settings.orientation;
+    return {
+        content,
+        orientation: orientation === "auto"
+            ? (window.innerHeight > window.innerWidth ? "portrait" : "landscape")
+            : orientation
+    };
+};
+
+window.renderSecondaryDisplayFrame = mode => {
+    document.body.classList.add("secondary-display");
+    document.body.dataset.secondaryContent = mode.content;
+    document.body.dataset.secondaryOrientation = mode.orientation;
+    document.body.innerHTML = `<main id="secondary_display_shell" data-secondary-content="${mode.content}">
+        <header id="secondary_display_header">
+            <strong>eDEX SECONDARY</strong>
+            <span>${window._escapeHtml(mode.content.toUpperCase())} // ${window._escapeHtml(mode.orientation.toUpperCase())}</span>
+        </header>
+        <section id="secondary_display_stage"></section>
+    </main>`;
+};
+
+window.initSecondarySpotify = () => {
+    const stage = document.getElementById("secondary_display_stage");
+    if (!stage) return false;
+    stage.classList.add("secondary_spotify_stage");
+    window.mods = {};
+    const baseShouldStart = window.shouldStartWidgetInitially;
+    window.shouldStartWidgetInitially = key => key === "spotify"
+        ? !window.areWidgetTimersPaused()
+        : (typeof baseShouldStart === "function" ? baseShouldStart(key) : false);
+    window.mods.spotify = new SpotifyPlayer("secondary_display_stage");
+    window.mods.spotify.fullscreen = true;
+    window.mods.spotify.refreshNodes();
+    window.mods.spotify.start();
+    return true;
+};
+
+window.initSecondaryWidgets = () => {
+    const shell = document.getElementById("secondary_display_shell");
+    if (!shell) return false;
+    shell.classList.add("secondary_widgets_shell");
+    shell.innerHTML = `<section class="mod_column activated" id="mod_column_left">
+        <h3 class="title"><p>PANEL</p><p>SYSTEM</p></h3>
+    </section>
+    <section class="mod_column activated" id="mod_column_right">
+        <h3 class="title"><p>PANEL</p><p>NETWORK</p></h3>
+    </section>`;
+
+    window.mods = {};
+    window.mods.clock = new Clock("mod_column_left");
+    window.mods.sysinfo = new Sysinfo("mod_column_left");
+    window.mods.hardwareInspector = new HardwareInspector("mod_column_left");
+    window.mods.cpuinfo = new Cpuinfo("mod_column_left");
+    window.mods.ramwatcher = new RAMwatcher("mod_column_left");
+    window.mods.toplist = new Toplist("mod_column_left");
+    window.mods.netstat = new Netstat("mod_column_right");
+    window.mods.globe = new LocationGlobe("mod_column_right");
+    window.mods.conninfo = new Conninfo("mod_column_right");
+    window.mods.spotify = new SpotifyPlayer("mod_column_right");
+    window.applyWidgetVisibility();
+    document.querySelectorAll(".mod_column > div").forEach(element => {
+        element.setAttribute("style", "animation-play-state: running;");
+    });
+    return true;
+};
+
+window.initSecondaryTerminal = () => {
+    const stage = document.getElementById("secondary_display_stage");
+    if (!stage) return false;
+    stage.classList.add("secondary_terminal_stage");
+    stage.innerHTML = `<section id="secondary_terminal_shell" augmented-ui="bl-clip tr-clip exe">
+        <h3 class="title"><p>TERMINAL</p><p>SECONDARY</p></h3>
+        <div id="secondary_terminal_status">ALLOCATING TTY</div>
+        <pre id="secondary_terminal"></pre>
+    </section>`;
+
+    const status = document.getElementById("secondary_terminal_status");
+    window.term = {};
+    window.currentTerm = 0;
+    ipc.send("ttyspawn", {source: "secondary-display"});
+    ipc.once("ttyspawn-reply", (event, reply) => {
+        const message = String(reply || "");
+        if (!message.startsWith("SUCCESS:")) {
+            if (status) status.textContent = message || "Unable to allocate terminal";
+            return;
+        }
+        const port = Number(message.split(":").pop().trim());
+        if (!Number.isInteger(port)) {
+            if (status) status.textContent = "Invalid terminal port";
+            return;
+        }
+        if (status) status.textContent = `TTY ${port}`;
+        window.term[0] = new Terminal({
+            role: "client",
+            parentId: "secondary_terminal",
+            port
+        });
+        window.term[0].onprocesschange = processName => {
+            if (status) status.textContent = processName ? `TTY ${port} // ${processName}` : `TTY ${port}`;
+        };
+        window.term[0].onclose = () => {
+            if (status) status.textContent = "TERMINAL DISCONNECTED";
+        };
+    });
+    return true;
+};
+
+window.initSecondaryBlank = () => {
+    const stage = document.getElementById("secondary_display_stage");
+    if (!stage) return false;
+    stage.innerHTML = `<section id="secondary_blank_panel">
+        <strong>SECONDARY DISPLAY READY</strong>
+        <span>Choose Spotify, widgets, or terminal in Settings Center.</span>
+    </section>`;
+    return true;
+};
+
+async function initSecondaryDisplayUI() {
+    window.applyLayoutPresetClasses();
+    const mode = window.secondaryDisplayMode();
+    window.renderSecondaryDisplayFrame(mode);
+    window.audioManager.expand.play();
+    if (mode.content === "widgets") return window.initSecondaryWidgets();
+    if (mode.content === "terminal") return window.initSecondaryTerminal();
+    if (mode.content === "blank") return window.initSecondaryBlank();
+    return window.initSecondarySpotify();
+}
+
 window.pendingLauncherAction = "";
 window.devCockpitReady = false;
 window.devCockpitInitError = "";
@@ -937,10 +1101,6 @@ window.openLauncherAction = action => {
                 return window.devActionOrDefer(action, "openErrorToFixFlow");
             case "network":
                 return window.devActionOrDefer(action, "openDevNetworkLens");
-            case "layout":
-                return window.devActionOrDefer(action, "openDevLayoutEditor");
-            case "theme":
-                return window.devActionOrDefer(action, "openDevThemeEditor");
             default:
                 return false;
         }
@@ -971,9 +1131,7 @@ window.renderLauncherRail = () => {
         ["diagnostics", "diagnostics", "Diagnostics"],
         ["editor", "edit", "Editor"],
         ["ssh", "terminal", "SSH"],
-        ["network", "network", "Network Lens"],
-        ["theme", "theme", "Theme Tools"],
-        ["layout", "layout", "Layout Tools"]
+        ["network", "network", "Network Lens"]
     ];
     if (window.settings && window.settings.ai && window.settings.ai.enabled === true) {
         actions.splice(5, 0, ["errorfix", "diagnostics", "Fix"]);
@@ -988,6 +1146,7 @@ window.renderLauncherRail = () => {
         <button type="button" data-launcher-action="${action}" title="${label}" aria-label="${label}">
             ${window.revivalIcon(icon, label)}
         </button>`).join("");
+    existing.style.setProperty("--launcher-action-count", String(actions.length));
     if (!window.launcherHeaderEventsBound) {
         window.launcherHeaderEventsBound = true;
         document.addEventListener("click", event => {
@@ -1344,8 +1503,24 @@ window.normalizeWidgetSettings = () => {
 
 window.areWidgetsVisible = () => window.normalizeWidgetSettings().visible !== false;
 
+window.isSpotifyRoutedToSecondary = () => {
+    if (window.isSecondaryDisplay) return false;
+    const dualMonitor = window.normalizeDualMonitorSettings(window.settings.dualMonitor || {});
+    const widgets = window.settings && window.settings.widgets || {};
+    const routed = dualMonitor.content === "spotify" || (dualMonitor.content === "widgets" && widgets.spotify !== false);
+    if (!dualMonitor.enabled || !routed) return false;
+    try {
+        return edex.screen.getAllDisplays().length > 1;
+    } catch(e) {
+        return true;
+    }
+};
+
+window.isWidgetSuppressedOnPrimary = key => key === "spotify" && window.isSpotifyRoutedToSecondary();
+
 window.isWidgetVisible = key => {
     const widgets = window.normalizeWidgetSettings();
+    if (window.isWidgetSuppressedOnPrimary(key)) return false;
     return widgets.visible !== false && widgets[key] !== false && (!window.widgetCatalog()[key] || window.isWidgetColumnEnabled(key));
 };
 
@@ -1374,6 +1549,7 @@ window.shouldStartWidgetInitially = key => {
     const widgets = window.normalizeWidgetSettings();
     const visible = widgets.visible !== false;
     if (!window.widgetCatalog()[key]) return false;
+    if (window.isWidgetSuppressedOnPrimary(key)) return false;
     if (key === "spotify") return visible && window.isWidgetColumnEnabled(key) && widgets.spotify !== false && !window.areWidgetTimersPaused();
     const perf = window.performanceSettings();
     if (perf.pauseHiddenWidgets === false) return true;
@@ -1513,7 +1689,8 @@ window.applyWidgetVisibility = () => {
         const entry = catalog[key];
         const columnEnabled = window.isWidgetColumnEnabled(key);
         const extraHidden = key === "globe" ? (globeMode === "hidden" || !globeEnabled) : false;
-        const hide = !visible || !columnEnabled || widgets[key] === false || extraHidden;
+        const routedHidden = window.isWidgetSuppressedOnPrimary(key);
+        const hide = !visible || !columnEnabled || widgets[key] === false || extraHidden || routedHidden;
         setHidden(`#${entry.element}`, hide, key);
         states[key] = !hide;
     });
@@ -1532,6 +1709,7 @@ window.applyWidgetVisibility = () => {
     document.body.classList.toggle("widgets-hide-ip", widgets.showIp === false);
     document.body.classList.toggle("widgets-hide-interface", widgets.showInterface === false);
     document.body.classList.toggle("widgets-hide-geo", widgets.showGeo === false);
+    document.body.classList.toggle("widgets-spotify-routed", window.isSpotifyRoutedToSecondary());
     document.body.dataset.layoutPreset = window.settings.layoutPreset || "classic";
     document.body.dataset.globeMode = globeMode;
 
@@ -1886,7 +2064,7 @@ window.openSettings = async () => {
     if (document.getElementById("settingsEditor")) return;
 
     // Build lists of available keyboards, themes, monitors
-    let keyboards = "", themes = "", monitors = "", ifaces = "";
+    let keyboards = "", themes = "", monitors = "", dualMonitorDisplays = "", ifaces = "";
     fs.readdirSync(keyboardsDir).forEach(kb => {
         if (!kb.endsWith(".json")) return;
         kb = kb.replace(".json", "");
@@ -1899,9 +2077,20 @@ window.openSettings = async () => {
         if (th === window.settings.theme) return;
         themes += `<option>${th}</option>`;
     });
-    for (let i = 0; i < edex.screen.getAllDisplays().length; i++) {
+    const displays = edex.screen.getAllDisplays();
+    for (let i = 0; i < displays.length; i++) {
         if (i !== window.settings.monitor) monitors += `<option>${i}</option>`;
     }
+    const dualMonitorSettings = window.normalizeDualMonitorSettings(window.settings.dualMonitor || {});
+    const displayOptionLabel = (display, index) => {
+        const bounds = display && display.bounds || {};
+        const orientation = Number(bounds.height) > Number(bounds.width) ? "portrait" : "landscape";
+        return `${index} - ${Number(bounds.width) || 0}x${Number(bounds.height) || 0} - ${orientation}`;
+    };
+    dualMonitorDisplays = `<option value="auto" ${dualMonitorSettings.display === "auto" ? "selected" : ""}>auto - first display not used by main UI</option>`;
+    displays.forEach((display, index) => {
+        dualMonitorDisplays += `<option value="${index}" ${dualMonitorSettings.display === index ? "selected" : ""}>${window._escapeHtml(displayOptionLabel(display, index))}</option>`;
+    });
     let nets = await window.si.networkInterfaces();
     const currentIface = window.settings.iface || "auto";
     const ifaceLabel = net => {
@@ -2214,6 +2403,50 @@ window.openSettings = async () => {
                         </select></td>
                     </tr>
                     <tr>
+                        <td>dualMonitor.enabled</td>
+                        <td>Open a dedicated eDEX secondary display window when another monitor is available</td>
+                        <td><select id="settingsEditor-dualMonitor-enabled">
+                            <option>${dualMonitorSettings.enabled === true}</option>
+                            <option>${dualMonitorSettings.enabled !== true}</option>
+                        </select></td>
+                    </tr>
+                    <tr>
+                        <td>dualMonitor.display</td>
+                        <td>Secondary monitor target. Auto avoids the main UI monitor.</td>
+                        <td><select id="settingsEditor-dualMonitor-display">
+                            ${dualMonitorDisplays}
+                        </select></td>
+                    </tr>
+                    <tr>
+                        <td>dualMonitor.content</td>
+                        <td>Content rendered on the secondary monitor</td>
+                        <td><select id="settingsEditor-dualMonitor-content">
+                            <option>${dualMonitorSettings.content}</option>
+                            <option>spotify</option>
+                            <option>widgets</option>
+                            <option>terminal</option>
+                            <option>blank</option>
+                        </select></td>
+                    </tr>
+                    <tr>
+                        <td>dualMonitor.orientation</td>
+                        <td>Secondary display layout orientation. Use auto to follow the display bounds.</td>
+                        <td><select id="settingsEditor-dualMonitor-orientation">
+                            <option>${dualMonitorSettings.orientation}</option>
+                            <option>auto</option>
+                            <option>landscape</option>
+                            <option>portrait</option>
+                        </select></td>
+                    </tr>
+                    <tr>
+                        <td>dualMonitor.fullscreen</td>
+                        <td>Fill the secondary monitor instead of opening a framed test window</td>
+                        <td><select id="settingsEditor-dualMonitor-fullscreen">
+                            <option>${dualMonitorSettings.fullscreen !== false}</option>
+                            <option>${dualMonitorSettings.fullscreen === false}</option>
+                        </select></td>
+                    </tr>
+                    <tr>
                         <td>nointro</td>
                         <td>Skip the intro boot log and logo${(window.settings.nointroOverride) ? " (Currently overridden by CLI flag)" : ""}</td>
                         <td><select id="settingsEditor-nointro">
@@ -2326,7 +2559,7 @@ window.openSettings = async () => {
                     </tr>
                     <tr>
                         <td>widgets.spotify</td>
-                        <td>Show Spotify Connect player widget</td>
+                        <td>${window.isSpotifyRoutedToSecondary() ? "Spotify is routed to the secondary display, so the main display widget is hidden." : "Show Spotify Connect player widget"}</td>
                         <td><select id="settingsEditor-widgets-spotify">
                             <option>${widgetSettings.spotify !== false}</option>
                             <option>${widgetSettings.spotify === false}</option>
@@ -2723,12 +2956,7 @@ window.openSettings = async () => {
                 </table>
                 <h6 id="settingsEditorStatus">Loaded values from memory</h6>
                 <br>`,
-        buttons: [
-            {label: "Open in External Editor", action:`edex.openPath('${settingsFile}');appWindow.minimize();`},
-            {label: "Save to Disk", action: "window.writeSettingsFile()"},
-            {label: "Reload UI", action: "window.location.reload(true);"},
-            {label: "Restart eDEX", action: "edex.app.relaunch();edex.app.quit();"}
-        ]
+        buttons: []
     }, () => {
         // Link the keyboard back to the terminal
         window.keyboard.attach();
@@ -2742,19 +2970,14 @@ window.openSettings = async () => {
 };
 
 window.settingsSectionForKey = key => {
-    if (/^devExplorer\.|^hideDotfiles$|^fsListView$/.test(key)) return "explorer";
-    if (/^editor\./.test(key)) return "editor";
-    if (/^ai\./.test(key)) return "ai";
-    if (/^spotify\./.test(key)) return "spotify";
+    if (/^theme$|^layoutPreset$|^launcherRail\.|^monitor$|^dualMonitor\.|^clockHours$|^nointro$|^nocursor$|^allowWindowed$|^keepGeometry$/.test(key)) return "display";
+    if (/^shell|^cwd$|^env$|^termFontSize$|^terminalStyle\.|^terminal\.|^port$/.test(key)) return "terminal";
+    if (/^devExplorer\.|^editor\.|^hideDotfiles$|^fsListView$/.test(key)) return "workspace";
     if (/^widgets\./.test(key)) return "widgets";
-    if (/^updates\./.test(key)) return "updates";
-    if (/^privacy\./.test(key)) return "privacy";
-    if (/^performance\./.test(key)) return "performance";
-    if (/^theme$|^layoutPreset$|^launcherRail\.|^keyboard$|^monitor$|^clockHours$|^nointro$|^nocursor$|^allowWindowed$|^keepGeometry$/.test(key)) return "appearance";
-    if (/^iface$|^pingAddr$/.test(key)) return "network";
-    if (/^shell|^cwd$|^env$|^termFontSize$|^terminalStyle\.|^terminal\.|^port$|^launchOnStartup$/.test(key)) return "terminal";
-    if (/^experimental|^excludeThreadsFromToplist$/.test(key)) return "advanced";
-    return "general";
+    if (/^spotify\.|^ai\.|^updates\.|^launchOnStartup$/.test(key)) return "integrations";
+    if (/^privacy\.|^iface$|^pingAddr$/.test(key)) return "privacy";
+    if (/^performance\.|^experimental|^excludeThreadsFromToplist$/.test(key)) return "advanced";
+    return "core";
 };
 
 window.enhanceSettingsEditor = () => {
@@ -2763,18 +2986,13 @@ window.enhanceSettingsEditor = () => {
     table.dataset.enhanced = "true";
 
     const sections = [
-        ["general", "General"],
-        ["appearance", "Appearance"],
+        ["core", "Core"],
+        ["display", "Display"],
         ["terminal", "Terminal"],
-        ["explorer", "File Explorer"],
-        ["editor", "Editor"],
+        ["workspace", "Workspace"],
         ["widgets", "Widgets"],
-        ["spotify", "Spotify"],
-        ["updates", "Updates"],
+        ["integrations", "Integrations"],
         ["privacy", "Privacy"],
-        ["performance", "Performance"],
-        ["network", "Network"],
-        ["ai", "AI"],
         ["advanced", "Advanced"]
     ];
 
@@ -2787,14 +3005,23 @@ window.enhanceSettingsEditor = () => {
     quick.innerHTML = `
         <div>
             <strong>eDEX Settings</strong>
-            <span>Change values, save to disk, then reload/restart when required.</span>
+            <span>Core controls first. Use search for exact setting names.</span>
         </div>
-        <button type="button" data-settings-action="preview-theme">Preview Theme</button>
-        <button type="button" data-settings-action="apply-theme">Apply Theme</button>
+        <input id="settingsEditorSearch" type="search" placeholder="Search settings">
+        <button type="button" class="primary" data-settings-action="save">Save</button>
         <button type="button" data-settings-action="reset-section">Reset Section</button>
-        <button type="button" data-settings-action="export-profile">Export</button>
-        <button type="button" data-settings-action="import-profile">Import</button>
-        <button type="button" data-settings-action="save">Save</button>`;
+        <details class="settings_editor_more">
+            <summary>More</summary>
+            <div>
+                <button type="button" data-settings-action="preview-theme">Preview Theme</button>
+                <button type="button" data-settings-action="apply-theme">Apply Theme</button>
+                <button type="button" data-settings-action="export-profile">Export Profile</button>
+                <button type="button" data-settings-action="import-profile">Import Profile</button>
+                <button type="button" data-settings-action="open-file">Open JSON</button>
+                <button type="button" data-settings-action="reload">Reload UI</button>
+                <button type="button" data-settings-action="restart">Restart eDEX</button>
+            </div>
+        </details>`;
 
     const tabs = document.createElement("div");
     tabs.className = "settings_editor_tabs";
@@ -2819,14 +3046,23 @@ window.enhanceSettingsEditor = () => {
         row.dataset.settingsGroup = window.settingsSectionForKey(key);
     });
 
+    const search = quick.querySelector("#settingsEditorSearch");
+    const filterRows = () => {
+        const section = shell.dataset.activeSection || "core";
+        const query = search ? search.value.trim().toLowerCase() : "";
+        table.querySelectorAll("tr[data-settings-group]").forEach(row => {
+            const matchesSearch = !query || row.textContent.toLowerCase().includes(query);
+            const matchesSection = query ? true : row.dataset.settingsGroup === section;
+            row.classList.toggle("settings_section_hidden", !matchesSearch || !matchesSection);
+        });
+    };
+
     const activate = section => {
         shell.dataset.activeSection = section;
         tabs.querySelectorAll("button").forEach(button => {
             button.classList.toggle("active", button.dataset.settingsSection === section);
         });
-        table.querySelectorAll("tr[data-settings-group]").forEach(row => {
-            row.classList.toggle("settings_section_hidden", row.dataset.settingsGroup !== section);
-        });
+        filterRows();
     };
 
     tabs.addEventListener("click", event => {
@@ -2842,7 +3078,17 @@ window.enhanceSettingsEditor = () => {
         if (button.dataset.settingsAction === "reset-section") window.resetSettingsSection();
         if (button.dataset.settingsAction === "export-profile") window.exportSettingsProfile();
         if (button.dataset.settingsAction === "import-profile") window.importSettingsProfile();
+        if (button.dataset.settingsAction === "open-file") {
+            edex.openPath(settingsFile);
+            appWindow.minimize();
+        }
+        if (button.dataset.settingsAction === "reload") window.location.reload(true);
+        if (button.dataset.settingsAction === "restart") {
+            edex.app.relaunch();
+            edex.app.quit();
+        }
     });
+    if (search) search.addEventListener("input", filterRows);
     const testShellButton = document.getElementById("settingsEditor-testShell");
     if (testShellButton) {
         testShellButton.addEventListener("click", () => window.testSettingsShell());
@@ -2859,7 +3105,7 @@ window.enhanceSettingsEditor = () => {
         window.updateSpotifySettingsRedirectUri();
     }
 
-    activate("general");
+    activate("core");
 };
 
 window.currentSpotifySettingsRedirectUri = () => {
@@ -2988,6 +3234,11 @@ window.settingsEditorDefaults = () => Object.assign({
     "launcherRail.compact": false,
     "launcherRail.labels": true,
     "launcherRail.autoHide": true,
+    "dualMonitor.enabled": false,
+    "dualMonitor.display": "auto",
+    "dualMonitor.content": "spotify",
+    "dualMonitor.orientation": "auto",
+    "dualMonitor.fullscreen": true,
     termFontSize: 15,
     "terminalStyle.foreground": "",
     "terminalStyle.background": "",
@@ -3214,6 +3465,24 @@ window.validateSettingsEditor = () => {
         }
     }
 
+    const dualMonitorDisplay = value("settingsEditor-dualMonitor-display");
+    const displays = edex.screen.getAllDisplays();
+    if (dualMonitorDisplay !== "auto") {
+        const display = Number(dualMonitorDisplay);
+        if (!Number.isInteger(display) || display < 0 || display >= displays.length) {
+            errors.push("Dual monitor display must be auto or an available display index.");
+        }
+    }
+    if (!["spotify", "widgets", "terminal", "blank"].includes(value("settingsEditor-dualMonitor-content"))) {
+        errors.push("Dual monitor content is invalid.");
+    }
+    if (!["auto", "landscape", "portrait"].includes(value("settingsEditor-dualMonitor-orientation"))) {
+        errors.push("Dual monitor orientation is invalid.");
+    }
+    if (value("settingsEditor-dualMonitor-enabled") === "true" && displays.length < 2) {
+        warnings.push("Dual monitor mode is enabled, but only one display is currently detected.");
+    }
+
     const clockValue = Number(value("settingsEditor-clockHours"));
     if (![12, 24].includes(clockValue)) errors.push("Clock format must be 12 or 24.");
 
@@ -3295,6 +3564,15 @@ window.writeSettingsFile = () => {
             compact: (document.getElementById("settingsEditor-launcherRail-compact").value === "true"),
             labels: (document.getElementById("settingsEditor-launcherRail-labels").value === "true"),
             autoHide: true
+        },
+        dualMonitor: {
+            enabled: (document.getElementById("settingsEditor-dualMonitor-enabled").value === "true"),
+            display: document.getElementById("settingsEditor-dualMonitor-display").value === "auto"
+                ? "auto"
+                : Number(document.getElementById("settingsEditor-dualMonitor-display").value),
+            content: document.getElementById("settingsEditor-dualMonitor-content").value,
+            orientation: document.getElementById("settingsEditor-dualMonitor-orientation").value,
+            fullscreen: (document.getElementById("settingsEditor-dualMonitor-fullscreen").value === "true")
         },
         performance: {
             profile: document.getElementById("settingsEditor-performance-profile").value,
@@ -3443,6 +3721,18 @@ window.writeSettingsFile = () => {
 
     fs.writeFileSync(settingsFile, JSON.stringify(window.settings, "", 4));
     edex.startup.set(window.settings.launchOnStartup);
+    if (edex.dualMonitor && typeof edex.dualMonitor.apply === "function") {
+        edex.dualMonitor.apply().then(state => {
+            const status = document.getElementById("settingsEditorStatus");
+            if (!status || !state || window.settings.dualMonitor.enabled !== true) return;
+            status.innerText += state.running
+                ? ` Secondary display running on monitor ${state.display}.`
+                : " Secondary display is enabled but no secondary monitor is available.";
+        }).catch(error => {
+            const status = document.getElementById("settingsEditorStatus");
+            if (status) status.innerText += ` Dual monitor apply failed: ${error.message || error}`;
+        });
+    }
     window.renderLauncherRail();
     window.applyWidgetVisibility();
     window.applyTerminalStyle();
@@ -3561,9 +3851,11 @@ window.openShortcutsHelp = () => {
 window.useAppShortcut = action => {
     switch(action) {
         case "COPY":
+            if (!window.term || !window.term[window.currentTerm]) return false;
             window.term[window.currentTerm].clipboard.copy();
             return true;
         case "PASTE":
+            if (!window.term || !window.term[window.currentTerm]) return false;
             window.term[window.currentTerm].clipboard.paste();
             return true;
         case "NEXT_TAB":
@@ -3643,9 +3935,10 @@ window.useAppShortcut = action => {
 
 // Global keyboard shortcuts
 const globalShortcut = edex.globalShortcut;
-globalShortcut.unregisterAll();
+if (!window.isSecondaryDisplay) globalShortcut.unregisterAll();
 
 window.registerKeyboardShortcuts = () => {
+    if (window.isSecondaryDisplay) return;
     window.shortcuts.forEach(cut => {
         if (!cut.enabled) return;
         if (cut.type === "app") {
@@ -3675,10 +3968,12 @@ window.registerKeyboardShortcuts();
 
 // See #361
 window.addEventListener("focus", () => {
+    if (window.isSecondaryDisplay) return;
     window.registerKeyboardShortcuts();
 });
 
 window.addEventListener("blur", () => {
+    if (window.isSecondaryDisplay) return;
     globalShortcut.unregisterAll();
 });
 

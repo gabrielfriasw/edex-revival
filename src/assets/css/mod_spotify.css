@@ -12,6 +12,34 @@ div#mod_spotify {
     pointer-events: auto;
 }
 
+body.secondary-display[data-secondary-orientation="portrait"].spotify-focus-mode div#mod_spotify.spotify_fullscreen .spotify_player {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, auto) auto auto auto auto;
+    grid-template-areas:
+        "art"
+        "meta"
+        "progress"
+        "controls"
+        "volume";
+    align-content: center;
+    justify-items: center;
+    gap: clamp(18px, 2.2vh, 34px);
+    overflow: hidden;
+}
+
+body.secondary-display[data-secondary-orientation="portrait"].spotify-focus-mode div#mod_spotify.spotify_fullscreen .spotify_art_shell {
+    width: min(72vw, 48vh, 620px);
+}
+
+body.secondary-display[data-secondary-orientation="portrait"].spotify-focus-mode div#mod_spotify.spotify_fullscreen .spotify_meta,
+body.secondary-display[data-secondary-orientation="portrait"].spotify-focus-mode div#mod_spotify.spotify_fullscreen .spotify_progress {
+    width: min(82vw, 760px);
+}
+
+body.secondary-display[data-secondary-orientation="portrait"].spotify-focus-mode div#mod_spotify.spotify_fullscreen .spotify_volume {
+    width: min(54vw, 320px);
+}
+
 div#mod_spotify::before,
 div#mod_spotify::after {
     content: "";
@@ -707,7 +735,7 @@ body.spotify-focus-mode div#mod_spotify.spotify_fullscreen .spotify_meta em {
 body.spotify-focus-mode div#mod_spotify.spotify_fullscreen .spotify_ascii_title {
     display: block;
     width: 100%;
-    font-size: clamp(10px, 0.85vw, 16px);
+    font-size: clamp(7px, 0.62vw, 12px);
     line-height: 1.05;
     max-width: 100%;
     margin-bottom: clamp(4px, 1vh, 12px);

@@ -47,7 +47,7 @@ ipc.on("log", (e, type, content) => {
     }
 });
 
-var win, tty, extraTtys;
+var win, secondaryWin, tty, extraTtys;
 const startupRecoveryWarnings = [];
 const settingsFile = path.join(electron.app.getPath("userData"), "settings.json");
 const shortcutsFile = path.join(electron.app.getPath("userData"), "shortcuts.json");
@@ -72,6 +72,13 @@ const defaultSettings = {
         compact: false,
         labels: true,
         autoHide: true
+    },
+    dualMonitor: {
+        enabled: false,
+        display: "auto",
+        content: "spotify",
+        orientation: "auto",
+        fullscreen: true
     },
     termFontSize: 15,
     terminal: {
@@ -169,7 +176,15 @@ function readSettingsFile() {
 }
 
 function isTrustedSender(event) {
-    return win && event.sender === win.webContents;
+    const sender = event && event.sender;
+    return !!sender && (
+        (win && !win.isDestroyed() && sender === win.webContents)
+        || (secondaryWin && !secondaryWin.isDestroyed() && sender === secondaryWin.webContents)
+    );
+}
+
+function isPrimarySender(event) {
+    return !!(event && win && !win.isDestroyed() && event.sender === win.webContents);
 }
 
 const updateState = {
@@ -354,11 +369,92 @@ function isSafeExternalURL(value) {
     }
 }
 
-function getRendererContext() {
+function normalizeDualMonitorSettings(dualMonitor) {
+    const source = dualMonitor && typeof dualMonitor === "object" && !Array.isArray(dualMonitor) ? dualMonitor : {};
+    const display = source.display === "auto" ? "auto" : Number(source.display);
+    const content = ["spotify", "widgets", "terminal", "blank"].includes(source.content) ? source.content : "spotify";
+    const orientation = ["auto", "landscape", "portrait"].includes(source.orientation) ? source.orientation : "auto";
+    return {
+        enabled: source.enabled === true,
+        display: display === "auto" || (Number.isInteger(display) && display >= 0) ? display : "auto",
+        content,
+        orientation,
+        fullscreen: source.fullscreen !== false
+    };
+}
+
+function displayIndexFor(display) {
+    const displays = screen.getAllDisplays();
+    return displays.findIndex(candidate => (
+        candidate.id === display.id
+        && candidate.bounds.x === display.bounds.x
+        && candidate.bounds.y === display.bounds.y
+        && candidate.bounds.width === display.bounds.width
+        && candidate.bounds.height === display.bounds.height
+    ));
+}
+
+function resolvePrimaryDisplayIndex(settings) {
+    const displays = screen.getAllDisplays();
+    if (Number.isInteger(Number(settings.monitor)) && displays[Number(settings.monitor)]) {
+        return Number(settings.monitor);
+    }
+    const primaryIndex = displayIndexFor(screen.getPrimaryDisplay());
+    return primaryIndex >= 0 ? primaryIndex : 0;
+}
+
+function resolveDualMonitorDisplay(settings, dualMonitor) {
+    const displays = screen.getAllDisplays();
+    if (displays.length < 2) return null;
+
+    const primaryIndex = resolvePrimaryDisplayIndex(settings);
+    const requested = Number(dualMonitor.display);
+    if (Number.isInteger(requested) && displays[requested] && requested !== primaryIndex) {
+        return {display: displays[requested], index: requested};
+    }
+
+    const fallbackIndex = displays.findIndex((display, index) => index !== primaryIndex);
+    if (fallbackIndex < 0) return null;
+    return {display: displays[fallbackIndex], index: fallbackIndex};
+}
+
+function resolveDualMonitorOrientation(dualMonitor, display) {
+    if (dualMonitor.orientation === "portrait" || dualMonitor.orientation === "landscape") {
+        return dualMonitor.orientation;
+    }
+    const bounds = display && display.bounds || {};
+    return Number(bounds.height) > Number(bounds.width) ? "portrait" : "landscape";
+}
+
+function rendererURL(query) {
+    return url.format({
+        pathname: path.join(__dirname, 'ui.html'),
+        protocol: 'file:',
+        slashes: true,
+        query
+    });
+}
+
+function getDualMonitorState(settings = readSettingsFile()) {
+    const dualMonitor = normalizeDualMonitorSettings(settings.dualMonitor);
+    const resolved = resolveDualMonitorDisplay(settings, dualMonitor);
+    return {
+        enabled: dualMonitor.enabled,
+        running: !!(secondaryWin && !secondaryWin.isDestroyed()),
+        supported: screen.getAllDisplays().length > 1,
+        display: resolved ? resolved.index : null,
+        content: dualMonitor.content,
+        orientation: resolved ? resolveDualMonitorOrientation(dualMonitor, resolved.display) : dualMonitor.orientation,
+        fullscreen: dualMonitor.fullscreen
+    };
+}
+
+function getRendererContext(sender) {
     return {
         appVersion: app.getVersion(),
         argv: process.argv.slice(),
         recoveryWarnings: startupRecoveryWarnings.slice(),
+        windowRole: secondaryWin && !secondaryWin.isDestroyed() && sender === secondaryWin.webContents ? "secondary" : "primary",
         paths: {
             app: app.getAppPath(),
             userData: app.getPath("userData"),
@@ -378,7 +474,7 @@ function recordStartupRecovery(message) {
 }
 
 ipc.on("edex:get-context", event => {
-    event.returnValue = getRendererContext();
+    event.returnValue = getRendererContext(event.sender);
 });
 
 ipc.handle("edex:open-external", (event, rawURL) => {
@@ -410,7 +506,7 @@ ipc.on("edex:app-control", (event, action) => {
 });
 
 ipc.on("edex:window-control", (event, action, ...args) => {
-    if (!isTrustedSender(event) || !win) return;
+    if (!isPrimarySender(event) || !win) return;
     switch(action) {
         case "minimize":
             win.minimize();
@@ -463,6 +559,16 @@ ipc.on("edex:screen-sync", (event, action) => {
     event.returnValue = action === "getAllDisplays" ? screen.getAllDisplays() : [];
 });
 
+ipc.handle("edex:dual-monitor-state", event => {
+    if (!isTrustedSender(event)) return null;
+    return getDualMonitorState();
+});
+
+ipc.handle("edex:dual-monitor-apply", event => {
+    if (!isPrimarySender(event)) return null;
+    return applyDualMonitorSettings();
+});
+
 ipc.handle("edex:updates-state", event => {
     if (!isTrustedSender(event)) return null;
     return Object.assign({}, updateState);
@@ -484,7 +590,7 @@ ipc.handle("edex:updates-install", event => {
 });
 
 ipc.on("edex:global-shortcut-register", (event, id, accelerator) => {
-    if (!isTrustedSender(event) || typeof id !== "string" || typeof accelerator !== "string") return;
+    if (!isPrimarySender(event) || typeof id !== "string" || typeof accelerator !== "string") return;
     globalShortcut.register(accelerator, () => {
         if (!event.sender.isDestroyed()) {
             event.sender.send("edex:global-shortcut", id);
@@ -493,7 +599,7 @@ ipc.on("edex:global-shortcut-register", (event, id, accelerator) => {
 });
 
 ipc.on("edex:global-shortcut-unregister-all", event => {
-    if (!isTrustedSender(event)) return;
+    if (!isPrimarySender(event)) return;
     globalShortcut.unregisterAll();
 });
 
@@ -645,11 +751,7 @@ function createWindow(settings) {
         }
     });
 
-    win.loadURL(url.format({
-        pathname: path.join(__dirname, 'ui.html'),
-        protocol: 'file:',
-        slashes: true
-    }));
+    win.loadURL(rendererURL());
 
     signale.complete("Frontend window created!");
     win.on("resize", () => {
@@ -659,13 +761,120 @@ function createWindow(settings) {
         if (!win.webContents.isDestroyed()) win.webContents.send("edex:window-event", "leave-full-screen");
     });
     win.show();
+    if (settings.forceFullscreen) {
+        win.setFullScreen(true);
+    }
     if (!settings.allowWindowed) {
         win.setResizable(false);
-    } else if (!require(lastWindowStateFile)["useFullscreen"]) {
+    } else if (!settings.forceFullscreen && !require(lastWindowStateFile)["useFullscreen"]) {
         win.setFullScreen(false);
     }
 
     signale.watch("Waiting for frontend connection...");
+}
+
+function closeSecondaryWindow() {
+    if (!secondaryWin || secondaryWin.isDestroyed()) {
+        secondaryWin = null;
+        return false;
+    }
+    const target = secondaryWin;
+    secondaryWin = null;
+    target.close();
+    return true;
+}
+
+function createSecondaryWindow(settings) {
+    const dualMonitor = normalizeDualMonitorSettings(settings.dualMonitor);
+    if (!dualMonitor.enabled) {
+        closeSecondaryWindow();
+        return null;
+    }
+
+    const resolved = resolveDualMonitorDisplay(settings, dualMonitor);
+    if (!resolved) {
+        signale.warn("Dual monitor mode requested but no secondary display is available.");
+        closeSecondaryWindow();
+        return null;
+    }
+
+    if (secondaryWin && !secondaryWin.isDestroyed()) {
+        closeSecondaryWindow();
+    }
+
+    const {display, index} = resolved;
+    const orientation = resolveDualMonitorOrientation(dualMonitor, display);
+    const {x, y, width, height} = display.bounds;
+    const useFullscreen = dualMonitor.fullscreen !== false;
+
+    secondaryWin = new BrowserWindow({
+        title: "eDEX Revival - Secondary Display",
+        x,
+        y,
+        width,
+        height,
+        show: false,
+        resizable: !useFullscreen,
+        movable: !useFullscreen,
+        fullscreen: useFullscreen,
+        fullscreenable: true,
+        autoHideMenuBar: true,
+        frame: !useFullscreen,
+        hasShadow: !useFullscreen,
+        backgroundColor: '#000000',
+        webPreferences: {
+            devTools: true,
+            preload: path.join(__dirname, "preload.js"),
+            sandbox: false,
+            contextIsolation: true,
+            backgroundThrottling: !(settings.performance && settings.performance.disableBackgroundThrottling === true),
+            webSecurity: true,
+            nodeIntegration: false,
+            nodeIntegrationInSubFrames: false,
+            allowRunningInsecureContent: false,
+            experimentalFeatures: settings.experimentalFeatures || false
+        }
+    });
+
+    secondaryWin.loadURL(rendererURL({
+        display: "secondary",
+        content: dualMonitor.content,
+        orientation,
+        monitor: String(index)
+    }));
+
+    secondaryWin.on("closed", () => {
+        secondaryWin = null;
+    });
+    secondaryWin.on("resize", () => {
+        if (secondaryWin && !secondaryWin.webContents.isDestroyed()) {
+            secondaryWin.webContents.send("edex:window-event", "resize");
+        }
+    });
+    secondaryWin.once("ready-to-show", () => {
+        if (!secondaryWin || secondaryWin.isDestroyed()) return;
+        if (useFullscreen) {
+            secondaryWin.setBounds({x, y, width, height});
+        }
+        if (typeof secondaryWin.showInactive === "function") secondaryWin.showInactive();
+        else secondaryWin.show();
+        if (useFullscreen) {
+            secondaryWin.setFullScreen(true);
+        }
+    });
+
+    signale.complete(`Secondary display window created on monitor ${index} (${dualMonitor.content}, ${orientation}).`);
+    return secondaryWin;
+}
+
+function applyDualMonitorSettings(settings = readSettingsFile()) {
+    settings.dualMonitor = normalizeDualMonitorSettings(settings.dualMonitor);
+    if (!settings.dualMonitor.enabled) {
+        closeSecondaryWindow();
+        return getDualMonitorState(settings);
+    }
+    createSecondaryWindow(settings);
+    return getDualMonitorState(settings);
 }
 
 async function resolveShellPath(shellName) {
@@ -724,6 +933,7 @@ function parseEnvOverrides(value) {
 app.on('ready', async () => {
     signale.pending(`Loading settings file...`);
     let settings = readSettingsFile();
+    settings.dualMonitor = normalizeDualMonitorSettings(settings.dualMonitor);
     devBackend.setStartup(settings.launchOnStartup);
     signale.pending(`Resolving shell path...`);
     settings.shell = await resolveShellPathWithFallback(settings.shell).catch(e => { throw(e) });
@@ -784,9 +994,6 @@ app.on('ready', async () => {
         isTrustedSender,
         signale
     });
-
-    createWindow(settings);
-    configureAutoUpdater(settings);
 
     // Support for more terminals, used for creating tabs (currently limited to 4 extra terms)
     extraTtys = {};
@@ -878,10 +1085,14 @@ app.on('ready', async () => {
         if (!isTrustedSender(e)) return;
         kbOverride = typeof arg === "string" ? arg : null;
     });
+
+    createWindow(settings);
+    createSecondaryWindow(settings);
+    configureAutoUpdater(settings);
 });
 
 app.on('web-contents-created', (e, contents) => {
-    // Prevent creating more than one window
+    // Prevent renderer-created popups; app-owned secondary displays are created in main.
     contents.setWindowOpenHandler(({url}) => {
         if (isSafeExternalURL(url)) {
             shell.openExternal(url);

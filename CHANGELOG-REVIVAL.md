@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## v1.0.4 - 2026-06-19
+
+- Added Dual Monitor Mode with a configurable secondary display target, content mode, orientation intent, and fullscreen behavior.
+- Added secondary-display content modes for Spotify focus, widgets, terminal, and blank stage.
+- Added secondary-display boot and intro flow so the second monitor no longer jumps directly into Spotify before the main startup experience.
+- Added Spotify routing logic that removes the Spotify widget from the primary monitor when Spotify is assigned to the secondary monitor.
+- Simplified Settings Center into clearer grouped sections with search, compact top actions, and a More menu.
+- Removed Launcher Theme Tools and Layout Tools actions to reduce redundant controls.
+- Fixed fullscreen startup behavior so force-fullscreen settings win over saved window bounds.
+- Fixed secondary Spotify focus sizing, stacking, and title rendering, including clipped ASCII-style playback titles.
+
 ## v1.0.3 - 2026-06-19
 
 - Added a Spotify Connect player widget with user-supplied Client ID setup, PKCE OAuth, encrypted token storage when Electron `safeStorage` is available, playback controls, album art proxying through the main process, and no client secret storage.
@@ -33,7 +44,7 @@
 
 - Renamed the app metadata to eDEX Revival 1.0.0 under `com.frias.edexrevival`, with Gabriel Frias as Revival author while preserving original eDEX-UI attribution.
 - Added Revival layout presets: Classic, Minimal, Developer, Privacy, and Cinematic.
-- Added the auto-hide icon launcher header for Settings, Widgets, Explorer, Diagnostics, Editor, SSH, Network Lens, Theme Tools, and Layout Tools.
+- Added the auto-hide icon launcher header for Settings, Widgets, Explorer, Diagnostics, Editor, SSH, and Network Lens.
 - Added Revival theme variants: classic cinematic, cyan contrast, amber contrast, and high contrast.
 - Added `editor.defaultOpenBehavior` with smart, editor, preview, external, and ask modes.
 - Added a native SSH profile client that opens saved hosts in terminal tabs without storing passwords.
