@@ -1,5 +1,58 @@
 # eDEX Revival Release Notes
 
+## v1.0.3
+
+Spotify cockpit, widget layout, and fullscreen focus release.
+
+### Highlights
+
+- Added a Spotify Connect player widget powered by Spotify Web API and Authorization Code with PKCE.
+- Spotify setup is user-owned: each user supplies their own Spotify Developer app Client ID, with no Client Secret stored or required.
+- Settings Center now includes a guided Spotify setup flow with Dashboard/docs links, Redirect URI copy, Web API selection guidance, scopes, and Client ID-only instructions.
+- Added adaptive widget layout controls with drag-and-drop ordering between left and right columns.
+- Added Spotify Solo layout support and responsive widget density so Spotify can expand when other widgets are hidden.
+- Added a fullscreen Spotify focus mode with album art, ASCII-style title display, playback timeline, centered controls, and minimal volume.
+
+### Screenshots
+
+![Spotify fullscreen focus mode](https://raw.githubusercontent.com/gabrielfriasw/edex-revival/v1.0.3/media/revival/spotify2.png)
+
+<img alt="Spotify widget" src="https://raw.githubusercontent.com/gabrielfriasw/edex-revival/v1.0.3/media/revival/spotify-widget.png" width="360">
+
+### Fixes
+
+- Fixed Spotify fullscreen stacking and sizing so focus mode uses the full viewport instead of rendering as a clipped centered panel.
+- Fixed Spotify widget click handling so setup/connect/fullscreen actions respond reliably.
+- Fixed Spotify API handling for empty `204 No Content` playback responses.
+- Fixed settings JSON loading for UTF-8 BOM-prefixed files.
+- Improved hidden-widget behavior so disabled widgets are removed from layout flow.
+- Refined Spotify play/pause icon geometry and button spacing in normal and fullscreen modes.
+
+### Compatibility Notes
+
+- Users must create their own Spotify Developer app and select `Web API`.
+- Add the exact Redirect URI shown in Settings, usually `http://127.0.0.1:43879/spotify/callback`.
+- Paste only the Spotify app Client ID. Do not paste or store a Client Secret.
+- Spotify Premium may be required by Spotify for some playback-control behavior.
+- Existing settings are merged forward on first boot.
+
+### Validation
+
+- `node --check` on touched JavaScript files.
+- CSS brace checks on touched stylesheets.
+- `git diff --check`.
+- trailing whitespace scan.
+- `npm test`.
+
+### Download
+
+Use the Windows installer attached to this release. Linux builds use the AppImage target:
+
+```text
+eDEX-Revival-Windows-x64.exe
+eDEX-Revival-Linux-x86_64.AppImage
+```
+
 ## v1.0.2
 
 SSH reliability, native updates, terminal workflow, and floating-window UX release.

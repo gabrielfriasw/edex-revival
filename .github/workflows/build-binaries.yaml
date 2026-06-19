@@ -35,7 +35,7 @@ jobs:
         run: npm ci --prefix src
 
       - name: Build Windows installer
-        run: npm run build-windows -- --publish never
+        run: npm run build-windows -- --publish=never
 
       - uses: actions/upload-artifact@v4
         with:
@@ -66,7 +66,7 @@ jobs:
         run: npm ci --prefix src
 
       - name: Build Linux AppImage
-        run: npm run build-linux -- --publish never
+        run: npm run build-linux -- --publish=never
 
       - uses: actions/upload-artifact@v4
         with:

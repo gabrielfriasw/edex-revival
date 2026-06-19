@@ -371,6 +371,78 @@ div.modal_popup table#settingsEditor select {
     font-family: var(--font_mono);
 }
 
+.spotify_settings_guide {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid rgba(var(--color_r), var(--color_g), var(--color_b), 0.42);
+    background: rgba(var(--color_r), var(--color_g), var(--color_b), 0.045);
+    box-sizing: border-box;
+}
+
+.spotify_settings_guide_head {
+    display: grid;
+    gap: 4px;
+}
+
+.spotify_settings_guide_head strong {
+    font-size: 14px;
+}
+
+.spotify_settings_guide_head span,
+.spotify_scope_notes span {
+    font-size: 12px;
+    line-height: 1.35;
+    opacity: 0.78;
+}
+
+.spotify_settings_guide ol {
+    margin: 0;
+    padding-left: 22px;
+}
+
+.spotify_settings_guide li {
+    margin: 4px 0;
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.spotify_redirect_copy {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) max-content;
+    gap: 8px;
+    align-items: center;
+}
+
+div.modal_popup table#settingsEditor .spotify_redirect_copy input {
+    min-height: 32px;
+    font-size: 12px;
+}
+
+.spotify_scope_notes {
+    display: grid;
+    gap: 3px;
+    padding: 8px;
+    border-left: 2px solid rgba(var(--color_r), var(--color_g), var(--color_b), 0.58);
+    background: rgba(0, 0, 0, 0.22);
+}
+
+.spotify_settings_actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+div.modal_popup .spotify_settings_actions button,
+div.modal_popup .spotify_redirect_copy button {
+    min-height: 32px;
+    margin-left: 0;
+    border-radius: 3px;
+    border-bottom-left-radius: 3px;
+    border-bottom-right-radius: 3px;
+    font-size: 12px;
+}
+
 .widget_visibility_panel {
     width: 68vw;
     max-width: 68vw;
@@ -428,6 +500,56 @@ div.modal_popup table#settingsEditor select {
     font-size: 1.35vh;
 }
 
+.widget_layout_section {
+    min-width: 0;
+}
+
+.widget_layout_list {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.45vh;
+    min-height: 8vh;
+    padding: 0.45vh;
+    border: 0.12vh dashed rgba(var(--color_r), var(--color_g), var(--color_b), 0.36);
+    box-sizing: border-box;
+}
+
+.widget_layout_item {
+    display: grid;
+    grid-template-columns: 2.2vh minmax(0, 1fr);
+    gap: 0.45vw;
+    align-items: center;
+    min-height: 3.8vh;
+    padding: 0.45vh;
+    border: 0.12vh solid rgba(var(--color_r), var(--color_g), var(--color_b), 0.32);
+    background: rgba(var(--color_r), var(--color_g), var(--color_b), 0.045);
+    cursor: grab;
+}
+
+.widget_layout_item.dragging {
+    opacity: 0.48;
+}
+
+.widget_drag_handle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2vh;
+    height: 2vh;
+    border: 0.12vh solid rgba(var(--color_r), var(--color_g), var(--color_b), 0.42);
+    font-size: 10px;
+    opacity: 0.78;
+}
+
+.widget_layout_item label {
+    display: grid;
+    grid-template-columns: 2.2vh minmax(0, 1fr);
+    gap: 0.45vw;
+    align-items: center;
+    min-width: 0;
+    cursor: pointer;
+}
+
 .widget_visibility_panel input[type="checkbox"] {
     width: 1.6vh;
     height: 1.6vh;
@@ -465,6 +587,10 @@ h6#widgetVisibilityStatus {
 
     .settings_editor_quickbar {
         grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .spotify_redirect_copy {
+        grid-template-columns: 1fr;
     }
 
     .widget_visibility_panel {

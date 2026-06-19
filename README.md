@@ -9,7 +9,7 @@
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-GPL--3.0-blue?style=for-the-badge"></a>
   <img alt="Windows" src="https://img.shields.io/badge/windows-primary-00d4ff?style=for-the-badge">
   <img alt="Linux" src="https://img.shields.io/badge/linux-supported-39ff88?style=for-the-badge">
-  <img alt="Version" src="https://img.shields.io/badge/revival-1.0.2-9cf?style=for-the-badge">
+  <img alt="Version" src="https://img.shields.io/badge/revival-1.0.3-9cf?style=for-the-badge">
 </p>
 
 eDEX Revival is a revived sci-fi terminal, system monitor, file cockpit, lightweight editor, SSH launcher, and local developer cockpit.
@@ -28,6 +28,7 @@ It is a fork and continuation of the original [eDEX-UI](https://github.com/GitSq
 - File Operations Cockpit with explorer, preview, Git-aware actions, batch operations, terminal-here flow, and resizable internal windows.
 - Lightweight editor workbench with tabs, file sidebar, search, split view, save states, and safer file-open behavior.
 - Native SSH profile client that opens sessions in terminal tabs without storing passwords, with guided SSH key setup and keepalive controls.
+- Spotify Connect widget with user-owned Web API setup, PKCE OAuth, encrypted token storage when available, album art, playback controls, adaptive layout, and fullscreen focus mode.
 - Native packaged update flow with background download, progress UI, restart/install action, and Settings controls.
 - Terminal diagnostics and optional Error to Fix handoff for Codex or Claude CLI.
 - Privacy controls for IP, interface name, geolocation, and globe/network modes.
@@ -35,6 +36,16 @@ It is a fork and continuation of the original [eDEX-UI](https://github.com/GitSq
 - Terminal copy/paste shortcuts and tab close controls.
 
 ## Screenshots
+
+### Spotify Focus Mode
+
+![Spotify fullscreen focus mode](media/revival/spotify2.png)
+
+### Spotify Widget
+
+<p align="center">
+  <img alt="Spotify widget" src="media/revival/spotify-widget.png" width="360">
+</p>
 
 ### File Operations Cockpit
 
@@ -126,6 +137,16 @@ The SSH Client stores profile metadata only:
 Passwords are not stored. Authentication stays with your native `ssh` client, keys, ssh-agent, and terminal prompts.
 
 The SSH Client can guide users through generating an Ed25519 key, copying the public key, installing it on a server, testing key login, and switching a profile to key-based authentication.
+
+## Spotify
+
+Spotify integration is user-owned. Each user creates a Spotify Developer app, selects `Web API`, adds the local Redirect URI shown in Settings, and pastes only the app Client ID. eDEX Revival uses Authorization Code with PKCE and does not need or store a Client Secret.
+
+Requested Spotify scopes are limited to playback state, currently playing, and playback control:
+
+- `user-read-playback-state`
+- `user-read-currently-playing`
+- `user-modify-playback-state`
 
 ## Documentation
 

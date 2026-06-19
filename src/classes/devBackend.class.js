@@ -2,11 +2,13 @@ const crypto = require("crypto");
 const dns = require("dns");
 const fs = require("fs");
 const fsp = fs.promises;
+const http = require("http");
+const https = require("https");
 const os = require("os");
 const path = require("path");
 const url = require("url");
 const childProcess = require("child_process");
-const {clipboard} = require("electron");
+const {clipboard, safeStorage} = require("electron");
 const mime = require("mime-types");
 
 const MAX_PREVIEW_BYTES = 1024 * 1024;
@@ -15,6 +17,13 @@ const MAX_EDITOR_BYTES = 5 * 1024 * 1024;
 const MAX_WORKSPACE_FILES = 2500;
 const MAX_WORKSPACE_SEARCH_MATCHES = 250;
 const MAX_WORKSPACE_SEARCH_BYTES = 256 * 1024;
+const SPOTIFY_TOKEN_SKEW_MS = 60000;
+const SPOTIFY_IMAGE_MAX_BYTES = 768 * 1024;
+const SPOTIFY_SCOPES = [
+    "user-read-playback-state",
+    "user-read-currently-playing",
+    "user-modify-playback-state"
+];
 
 const moduleCache = {};
 
@@ -41,7 +50,7 @@ function resolveLocalPath(value) {
 
 function readJsonFile(file, fallback) {
     try {
-        return JSON.parse(fs.readFileSync(file, "utf-8"));
+        return JSON.parse(fs.readFileSync(file, "utf-8").replace(/^\uFEFF/, ""));
     } catch(e) {
         return fallback;
     }
@@ -83,6 +92,18 @@ function defaultAiSettings() {
     };
 }
 
+function defaultSpotifySettings() {
+    return {
+        enabled: false,
+        clientId: "",
+        callbackPort: 43879,
+        pollIntervalMs: 5000,
+        market: "",
+        showAlbumArt: true,
+        showDevices: true
+    };
+}
+
 function defaultDevSettings() {
     return {
         layoutPreset: "classic",
@@ -111,6 +132,7 @@ function defaultDevSettings() {
             enableErrorLens: "ai-only"
         },
         ai: defaultAiSettings(),
+        spotify: defaultSpotifySettings(),
         ssh: {
             profiles: [],
             lastProfileId: ""
@@ -189,6 +211,21 @@ function normalizeAiSettings(ai) {
     return next;
 }
 
+function normalizeSpotifySettings(spotify) {
+    const defaults = defaultSpotifySettings();
+    const next = mergeDefaults(spotify && typeof spotify === "object" && !Array.isArray(spotify) ? spotify : {}, defaults);
+    next.enabled = next.enabled === true;
+    next.clientId = String(next.clientId || "").trim();
+    if (!/^[A-Za-z0-9_-]{0,128}$/.test(next.clientId)) next.clientId = "";
+    next.callbackPort = clampInteger(next.callbackPort, 1024, 65535, defaults.callbackPort);
+    next.pollIntervalMs = clampInteger(next.pollIntervalMs, 2500, 30000, defaults.pollIntervalMs);
+    next.market = String(next.market || "").trim().toUpperCase();
+    if (next.market && !/^[A-Z]{2}$/.test(next.market)) next.market = "";
+    next.showAlbumArt = next.showAlbumArt !== false;
+    next.showDevices = next.showDevices !== false;
+    return next;
+}
+
 function normalizePerformanceSettings(performance) {
     const defaults = defaultDevSettings().performance;
     const source = performance && typeof performance === "object" && !Array.isArray(performance) ? performance : {};
@@ -227,6 +264,7 @@ function normalizePerformanceSettings(performance) {
 function normalizeSettings(settings) {
     const next = mergeDefaults(settings || {}, defaultDevSettings());
     next.ai = normalizeAiSettings(next.ai);
+    next.spotify = normalizeSpotifySettings(next.spotify);
     next.performance = normalizePerformanceSettings(next.performance);
     return next;
 }
@@ -1693,9 +1731,188 @@ async function createContextPack(type, rawCwd, options = {}) {
     return {created: true, exists: false, path: target, content};
 }
 
+function spotifyBase64Url(input) {
+    return Buffer.from(input).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function spotifyVerifier() {
+    return spotifyBase64Url(crypto.randomBytes(64)).slice(0, 96);
+}
+
+function spotifyChallenge(verifier) {
+    return spotifyBase64Url(crypto.createHash("sha256").update(verifier).digest());
+}
+
+function spotifyRedirectUri(settings) {
+    return `http://127.0.0.1:${settings.callbackPort}/spotify/callback`;
+}
+
+function spotifySafeError(error) {
+    return error && error.message ? String(error.message).replace(/Bearer\s+[A-Za-z0-9._~-]+/g, "Bearer [REDACTED]") : String(error || "Unknown Spotify error");
+}
+
+function spotifyHttpRequest(method, rawUrl, options = {}) {
+    return new Promise((resolve, reject) => {
+        let parsed;
+        try {
+            parsed = new URL(rawUrl);
+        } catch(error) {
+            reject(new Error("Invalid Spotify URL"));
+            return;
+        }
+        if (!["https:", "http:"].includes(parsed.protocol)) {
+            reject(new Error("Unsupported Spotify URL protocol"));
+            return;
+        }
+        const body = options.body == null ? null : (Buffer.isBuffer(options.body) ? options.body : Buffer.from(String(options.body)));
+        const headers = Object.assign({}, options.headers || {});
+        if (body && !headers["Content-Length"] && !headers["content-length"]) headers["Content-Length"] = body.length;
+        const client = parsed.protocol === "https:" ? https : http;
+        const req = client.request({
+            protocol: parsed.protocol,
+            hostname: parsed.hostname,
+            port: parsed.port || undefined,
+            method,
+            path: `${parsed.pathname}${parsed.search}`,
+            headers
+        }, res => {
+            const chunks = [];
+            let length = 0;
+            res.on("data", chunk => {
+                length += chunk.length;
+                if (options.maxBytes && length > options.maxBytes) {
+                    req.destroy(new Error("Spotify response exceeded size limit"));
+                    return;
+                }
+                chunks.push(chunk);
+            });
+            res.on("end", () => {
+                const buffer = Buffer.concat(chunks);
+                resolve({
+                    statusCode: res.statusCode || 0,
+                    headers: res.headers || {},
+                    buffer,
+                    text: buffer.toString("utf-8")
+                });
+            });
+        });
+        req.on("error", reject);
+        req.setTimeout(options.timeoutMs || 12000, () => {
+            req.destroy(new Error("Spotify request timed out"));
+        });
+        if (body) req.write(body);
+        req.end();
+    });
+}
+
+async function spotifyJsonRequest(method, rawUrl, options = {}) {
+    const response = await spotifyHttpRequest(method, rawUrl, options);
+    let json = null;
+    const text = String(response.text || "").trim();
+    if (text) {
+        try {
+            json = JSON.parse(text);
+        } catch(error) {
+            if (response.statusCode >= 200 && response.statusCode < 300) throw new Error("Spotify returned invalid JSON");
+        }
+    }
+    return Object.assign(response, {json});
+}
+
+function spotifyAuthResponse(title, detail) {
+    return `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title></head><body style="font-family:monospace;background:#020606;color:#39ffcc;padding:32px"><h1>${title}</h1><p>${detail}</p></body></html>`;
+}
+
+function spotifyNormalizeTokens(payload, previous) {
+    const now = Date.now();
+    return {
+        accessToken: String(payload.access_token || previous && previous.accessToken || ""),
+        refreshToken: String(payload.refresh_token || previous && previous.refreshToken || ""),
+        tokenType: String(payload.token_type || previous && previous.tokenType || "Bearer"),
+        scope: String(payload.scope || previous && previous.scope || ""),
+        expiresAt: now + (Number(payload.expires_in) || 3600) * 1000
+    };
+}
+
+function spotifySafeSettings(settings) {
+    const spotify = normalizeSpotifySettings(settings && settings.spotify || {});
+    return {
+        enabled: spotify.enabled === true,
+        configured: spotify.enabled === true && !!spotify.clientId,
+        clientId: spotify.clientId,
+        callbackPort: spotify.callbackPort,
+        redirectUri: spotifyRedirectUri(spotify),
+        pollIntervalMs: spotify.pollIntervalMs,
+        market: spotify.market,
+        showAlbumArt: spotify.showAlbumArt,
+        showDevices: spotify.showDevices,
+        scopes: SPOTIFY_SCOPES.slice()
+    };
+}
+
+function spotifyImageUrl(item) {
+    if (!item || typeof item !== "object") return "";
+    const albumImages = item.album && Array.isArray(item.album.images) ? item.album.images : [];
+    const itemImages = Array.isArray(item.images) ? item.images : [];
+    const images = albumImages.length ? albumImages : itemImages;
+    if (!images.length) return "";
+    const sorted = images.slice().sort((a, b) => Math.abs((a.width || 300) - 300) - Math.abs((b.width || 300) - 300));
+    return sorted[0] && sorted[0].url || "";
+}
+
+function spotifyArtistLabel(item) {
+    if (!item || typeof item !== "object") return "";
+    if (Array.isArray(item.artists) && item.artists.length) return item.artists.map(artist => artist && artist.name).filter(Boolean).join(", ");
+    if (item.show && item.show.publisher) return item.show.publisher;
+    if (item.show && item.show.name) return item.show.name;
+    return item.publisher || "";
+}
+
+function spotifyPlaybackSummary(playback, imageDataUrl) {
+    if (!playback || !playback.item) {
+        return {
+            active: !!playback,
+            isPlaying: !!(playback && playback.is_playing),
+            progressMs: playback && Number(playback.progress_ms) || 0,
+            durationMs: 0,
+            item: null,
+            device: playback && playback.device || null,
+            shuffleState: !!(playback && playback.shuffle_state),
+            repeatState: playback && playback.repeat_state || "off"
+        };
+    }
+    const item = playback.item;
+    return {
+        active: true,
+        isPlaying: playback.is_playing === true,
+        progressMs: Number(playback.progress_ms) || 0,
+        durationMs: Number(item.duration_ms) || 0,
+        item: {
+            id: item.id || "",
+            uri: item.uri || "",
+            type: item.type || playback.currently_playing_type || "track",
+            name: item.name || "",
+            artist: spotifyArtistLabel(item),
+            album: item.album && item.album.name || item.show && item.show.name || "",
+            externalUrl: item.external_urls && item.external_urls.spotify || "",
+            imageUrl: spotifyImageUrl(item),
+            imageDataUrl: imageDataUrl || ""
+        },
+        device: playback.device || null,
+        shuffleState: playback.shuffle_state === true,
+        repeatState: playback.repeat_state || "off"
+    };
+}
+
 function registerDevBackend({app, ipc, shell, getWindow, settingsFile, isTrustedSender, signale}) {
     const watchers = new Map();
     const promptDir = path.join(app.getPath("userData"), "ai-prompts");
+    const spotifyTokenFile = path.join(app.getPath("userData"), "spotify-auth.json");
+    const spotifyRuntime = {
+        tokens: null,
+        auth: null,
+        imageCache: new Map()
+    };
 
     function readSettings() {
         const current = normalizeSettings(readJsonFile(settingsFile, {}));
@@ -1704,6 +1921,334 @@ function registerDevBackend({app, ipc, shell, getWindow, settingsFile, isTrusted
 
     function persistSettings(settings) {
         writeJsonFile(settingsFile, normalizeSettings(settings));
+    }
+
+    function spotifyCanEncrypt() {
+        try {
+            return !!(safeStorage && safeStorage.isEncryptionAvailable && safeStorage.isEncryptionAvailable());
+        } catch(error) {
+            return false;
+        }
+    }
+
+    function spotifyReadTokens() {
+        if (spotifyRuntime.tokens) return spotifyRuntime.tokens;
+        const payload = readJsonFile(spotifyTokenFile, null);
+        if (!payload || typeof payload !== "object") return null;
+        try {
+            if (payload.encrypted === true && spotifyCanEncrypt()) {
+                const raw = safeStorage.decryptString(Buffer.from(String(payload.data || ""), "base64"));
+                spotifyRuntime.tokens = JSON.parse(raw);
+            }
+        } catch(error) {
+            spotifyRuntime.tokens = null;
+        }
+        return spotifyRuntime.tokens;
+    }
+
+    function spotifyPersistTokens(tokens) {
+        spotifyRuntime.tokens = tokens;
+        if (!spotifyCanEncrypt()) return {persistent: false};
+        const data = safeStorage.encryptString(JSON.stringify(tokens)).toString("base64");
+        writeJsonFile(spotifyTokenFile, {
+            version: 1,
+            encrypted: true,
+            createdAt: new Date().toISOString(),
+            data
+        });
+        return {persistent: true};
+    }
+
+    function spotifyClearTokens() {
+        spotifyRuntime.tokens = null;
+        spotifyRuntime.imageCache.clear();
+        try {
+            fs.unlinkSync(spotifyTokenFile);
+        } catch(error) {}
+    }
+
+    function spotifyAuthInProgress() {
+        return !!(spotifyRuntime.auth && spotifyRuntime.auth.expiresAt > Date.now());
+    }
+
+    function spotifyCloseAuth() {
+        if (spotifyRuntime.auth && spotifyRuntime.auth.server) {
+            try {
+                spotifyRuntime.auth.server.close();
+            } catch(error) {}
+        }
+        if (spotifyRuntime.auth && spotifyRuntime.auth.timeout) clearTimeout(spotifyRuntime.auth.timeout);
+        spotifyRuntime.auth = null;
+    }
+
+    function spotifyStatus(settings = readSettings()) {
+        const safe = spotifySafeSettings(settings);
+        const tokens = spotifyReadTokens();
+        return Object.assign({}, safe, {
+            connected: !!(tokens && tokens.refreshToken),
+            expiresAt: tokens && tokens.expiresAt || 0,
+            authInProgress: spotifyAuthInProgress(),
+            tokenPersistence: spotifyCanEncrypt() ? "encrypted" : "memory-only"
+        });
+    }
+
+    async function spotifyTokenRequest(params) {
+        const body = new URLSearchParams(params).toString();
+        const response = await spotifyJsonRequest("POST", "https://accounts.spotify.com/api/token", {
+            headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Accept": "application/json"
+            },
+            body
+        });
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+            const message = response.json && (response.json.error_description || response.json.error) || `Spotify token request failed (${response.statusCode})`;
+            throw new Error(message);
+        }
+        return response.json || {};
+    }
+
+    async function spotifyRefresh(settings, tokens) {
+        if (!tokens || !tokens.refreshToken) throw new Error("Spotify is not connected");
+        const payload = await spotifyTokenRequest({
+            grant_type: "refresh_token",
+            refresh_token: tokens.refreshToken,
+            client_id: settings.spotify.clientId
+        });
+        const next = spotifyNormalizeTokens(payload, tokens);
+        spotifyPersistTokens(next);
+        return next;
+    }
+
+    async function spotifyAccessToken(settings = readSettings()) {
+        settings = normalizeSettings(settings);
+        const spotify = settings.spotify;
+        if (spotify.enabled !== true || !spotify.clientId) throw new Error("Spotify integration is not configured");
+        let tokens = spotifyReadTokens();
+        if (!tokens || !tokens.refreshToken) throw new Error("Spotify is not connected");
+        if (!tokens.accessToken || Number(tokens.expiresAt) - SPOTIFY_TOKEN_SKEW_MS <= Date.now()) {
+            tokens = await spotifyRefresh(settings, tokens);
+        }
+        return tokens.accessToken;
+    }
+
+    async function spotifyApi(settings, method, endpoint, options = {}, allowRefresh = true) {
+        const token = await spotifyAccessToken(settings);
+        const query = options.query ? `?${new URLSearchParams(options.query).toString()}` : "";
+        const body = options.body ? JSON.stringify(options.body) : null;
+        const response = await spotifyJsonRequest(method, `https://api.spotify.com/v1${endpoint}${query}`, {
+            headers: Object.assign({
+                "Authorization": `Bearer ${token}`,
+                "Accept": "application/json"
+            }, body ? {"Content-Type": "application/json"} : {}),
+            body
+        });
+        if (response.statusCode === 401 && allowRefresh) {
+            await spotifyRefresh(normalizeSettings(settings), spotifyReadTokens());
+            return spotifyApi(settings, method, endpoint, options, false);
+        }
+        if (response.statusCode === 204) return null;
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+            const message = response.json && response.json.error && (response.json.error.message || response.json.error_description)
+                || `Spotify API request failed (${response.statusCode})`;
+            const error = new Error(message);
+            error.statusCode = response.statusCode;
+            throw error;
+        }
+        return response.json;
+    }
+
+    async function spotifyImageDataUrl(rawUrl) {
+        if (!rawUrl) return "";
+        let parsed;
+        try {
+            parsed = new URL(rawUrl);
+        } catch(error) {
+            return "";
+        }
+        if (parsed.protocol !== "https:") return "";
+        const cacheKey = parsed.toString();
+        const cached = spotifyRuntime.imageCache.get(cacheKey);
+        if (cached) return cached;
+        const response = await spotifyHttpRequest("GET", cacheKey, {
+            headers: {"Accept": "image/avif,image/webp,image/png,image/jpeg,image/*"},
+            maxBytes: SPOTIFY_IMAGE_MAX_BYTES,
+            timeoutMs: 8000
+        });
+        if (response.statusCode < 200 || response.statusCode >= 300) return "";
+        const type = String(response.headers["content-type"] || "image/jpeg").split(";")[0].trim();
+        if (!/^image\/(?:jpeg|jpg|png|webp|avif)$/i.test(type)) return "";
+        const dataUrl = `data:${type};base64,${response.buffer.toString("base64")}`;
+        spotifyRuntime.imageCache.set(cacheKey, dataUrl);
+        if (spotifyRuntime.imageCache.size > 12) {
+            const first = spotifyRuntime.imageCache.keys().next().value;
+            spotifyRuntime.imageCache.delete(first);
+        }
+        return dataUrl;
+    }
+
+    async function spotifyPlaybackState() {
+        const settings = normalizeSettings(readSettings());
+        const status = spotifyStatus(settings);
+        if (!status.configured || !status.connected) {
+            return {status, playback: null, devices: []};
+        }
+        try {
+            const query = settings.spotify.market ? {market: settings.spotify.market} : null;
+            const playback = await spotifyApi(settings, "GET", "/me/player", {query});
+            const devicesData = settings.spotify.showDevices === false ? {devices: []} : await spotifyApi(settings, "GET", "/me/player/devices").catch(() => ({devices: []}));
+            const imageUrl = spotifyImageUrl(playback && playback.item);
+            const imageDataUrl = settings.spotify.showAlbumArt === false ? "" : await spotifyImageDataUrl(imageUrl).catch(() => "");
+            return {
+                status: spotifyStatus(settings),
+                playback: spotifyPlaybackSummary(playback, imageDataUrl),
+                devices: Array.isArray(devicesData && devicesData.devices) ? devicesData.devices.map(device => ({
+                    id: device.id || "",
+                    name: device.name || "",
+                    type: device.type || "",
+                    isActive: device.is_active === true,
+                    isRestricted: device.is_restricted === true,
+                    isPrivateSession: device.is_private_session === true,
+                    volumePercent: typeof device.volume_percent === "number" ? device.volume_percent : null,
+                    supportsVolume: device.supports_volume === true
+                })) : []
+            };
+        } catch(error) {
+            return {
+                status: spotifyStatus(settings),
+                playback: null,
+                devices: [],
+                error: spotifySafeError(error),
+                premiumRequired: error && error.statusCode === 403
+            };
+        }
+    }
+
+    async function spotifyControl(action, options = {}) {
+        const settings = normalizeSettings(readSettings());
+        const deviceId = typeof options.deviceId === "string" && options.deviceId.length < 240 ? options.deviceId : "";
+        const deviceQuery = deviceId ? {device_id: deviceId} : null;
+        switch(action) {
+            case "play":
+                await spotifyApi(settings, "PUT", "/me/player/play", {query: deviceQuery, body: options.contextUri ? {context_uri: String(options.contextUri)} : undefined});
+                break;
+            case "pause":
+                await spotifyApi(settings, "PUT", "/me/player/pause", {query: deviceQuery});
+                break;
+            case "next":
+                await spotifyApi(settings, "POST", "/me/player/next", {query: deviceQuery});
+                break;
+            case "previous":
+                await spotifyApi(settings, "POST", "/me/player/previous", {query: deviceQuery});
+                break;
+            case "seek":
+                await spotifyApi(settings, "PUT", "/me/player/seek", {query: Object.assign({position_ms: Math.max(0, Math.round(Number(options.positionMs) || 0))}, deviceQuery || {})});
+                break;
+            case "volume":
+                await spotifyApi(settings, "PUT", "/me/player/volume", {query: Object.assign({volume_percent: Math.max(0, Math.min(100, Math.round(Number(options.volumePercent) || 0)))}, deviceQuery || {})});
+                break;
+            case "shuffle":
+                await spotifyApi(settings, "PUT", "/me/player/shuffle", {query: Object.assign({state: options.state === true ? "true" : "false"}, deviceQuery || {})});
+                break;
+            case "repeat":
+                await spotifyApi(settings, "PUT", "/me/player/repeat", {query: Object.assign({state: ["track", "context", "off"].includes(options.state) ? options.state : "off"}, deviceQuery || {})});
+                break;
+            case "transfer":
+                if (!deviceId) throw new Error("Spotify device is required");
+                await spotifyApi(settings, "PUT", "/me/player", {body: {device_ids: [deviceId], play: options.play === true}});
+                break;
+            default:
+                throw new Error("Unsupported Spotify control");
+        }
+        return {ok: true};
+    }
+
+    async function spotifyConfigure(options = {}) {
+        const settings = readSettings();
+        const patch = {};
+        if (typeof options.enabled === "boolean") patch.enabled = options.enabled;
+        if (typeof options.clientId === "string") patch.clientId = options.clientId;
+        if (typeof options.callbackPort !== "undefined") patch.callbackPort = options.callbackPort;
+        if (typeof options.pollIntervalMs !== "undefined") patch.pollIntervalMs = options.pollIntervalMs;
+        if (typeof options.market === "string") patch.market = options.market;
+        if (typeof options.showAlbumArt === "boolean") patch.showAlbumArt = options.showAlbumArt;
+        if (typeof options.showDevices === "boolean") patch.showDevices = options.showDevices;
+        settings.spotify = normalizeSpotifySettings(Object.assign({}, settings.spotify || {}, patch));
+        persistSettings(settings);
+        return spotifyStatus(settings);
+    }
+
+    async function spotifyStartAuth(options = {}) {
+        let settings = readSettings();
+        if (options && Object.keys(options).length) {
+            await spotifyConfigure(Object.assign({}, settings.spotify || {}, options, {enabled: true}));
+            settings = readSettings();
+        }
+        settings = normalizeSettings(settings);
+        const spotify = settings.spotify;
+        if (spotify.enabled !== true || !spotify.clientId) throw new Error("Set a Spotify Client ID before connecting");
+        spotifyCloseAuth();
+        const verifier = spotifyVerifier();
+        const state = crypto.randomBytes(16).toString("hex");
+        const redirectUri = spotifyRedirectUri(spotify);
+        const server = http.createServer(async (request, response) => {
+            try {
+                const parsed = new URL(request.url, redirectUri);
+                if (parsed.pathname !== "/spotify/callback") {
+                    response.writeHead(404, {"Content-Type": "text/plain"});
+                    response.end("Not found");
+                    return;
+                }
+                if (parsed.searchParams.get("state") !== state) throw new Error("Spotify authorization state mismatch");
+                if (parsed.searchParams.get("error")) throw new Error(parsed.searchParams.get("error"));
+                const code = parsed.searchParams.get("code");
+                if (!code) throw new Error("Spotify did not return an authorization code");
+                const payload = await spotifyTokenRequest({
+                    grant_type: "authorization_code",
+                    code,
+                    redirect_uri: redirectUri,
+                    client_id: spotify.clientId,
+                    code_verifier: verifier
+                });
+                spotifyPersistTokens(spotifyNormalizeTokens(payload));
+                response.writeHead(200, {"Content-Type": "text/html; charset=utf-8"});
+                response.end(spotifyAuthResponse("Spotify connected", "Return to eDEX Revival. This browser tab can be closed."));
+            } catch(error) {
+                response.writeHead(400, {"Content-Type": "text/html; charset=utf-8"});
+                response.end(spotifyAuthResponse("Spotify authorization failed", spotifySafeError(error)));
+            } finally {
+                setTimeout(spotifyCloseAuth, 250);
+            }
+        });
+        await new Promise((resolve, reject) => {
+            server.once("error", reject);
+            server.listen(spotify.callbackPort, "127.0.0.1", resolve);
+        });
+        const authUrl = new URL("https://accounts.spotify.com/authorize");
+        authUrl.searchParams.set("response_type", "code");
+        authUrl.searchParams.set("client_id", spotify.clientId);
+        authUrl.searchParams.set("scope", SPOTIFY_SCOPES.join(" "));
+        authUrl.searchParams.set("redirect_uri", redirectUri);
+        authUrl.searchParams.set("state", state);
+        authUrl.searchParams.set("code_challenge_method", "S256");
+        authUrl.searchParams.set("code_challenge", spotifyChallenge(verifier));
+        spotifyRuntime.auth = {
+            server,
+            state,
+            expiresAt: Date.now() + 5 * 60 * 1000,
+            timeout: setTimeout(spotifyCloseAuth, 5 * 60 * 1000)
+        };
+        shell.openExternal(authUrl.toString());
+        return Object.assign(spotifyStatus(settings), {
+            authUrl: authUrl.toString(),
+            redirectUri
+        });
+    }
+
+    async function spotifyDisconnect() {
+        spotifyCloseAuth();
+        spotifyClearTokens();
+        return spotifyStatus(readSettings());
     }
 
     function setPluginState(pluginId, enabled, errorMessage) {
@@ -1890,6 +2435,8 @@ function registerDevBackend({app, ipc, shell, getWindow, settingsFile, isTrusted
                 launchOnStartup: settings.launchOnStartup === true,
                 aiEnabled: !!(settings.ai && settings.ai.enabled === true),
                 aiProvider: settings.ai && (settings.ai.provider || settings.ai.defaultProvider) || "auto",
+                spotifyEnabled: !!(settings.spotify && settings.spotify.enabled === true),
+                spotifyConfigured: !!(settings.spotify && settings.spotify.clientId),
                 devExplorerEnabled: !!(settings.devExplorer && settings.devExplorer.enabled !== false),
                 widgetsVisible: !(settings.widgets && settings.widgets.visible === false),
                 performance: settings.performance
@@ -2223,6 +2770,36 @@ function registerDevBackend({app, ipc, shell, getWindow, settingsFile, isTrusted
     ipc.handle("edex:network-resolve-endpoint", async (event, endpoint) => {
         if (!trusted(event)) return null;
         return resolveEndpoint(endpoint);
+    });
+
+    ipc.handle("edex:spotify-status", async event => {
+        if (!trusted(event)) return null;
+        return spotifyStatus(readSettings());
+    });
+
+    ipc.handle("edex:spotify-configure", async (event, options) => {
+        if (!trusted(event)) return null;
+        return spotifyConfigure(options || {});
+    });
+
+    ipc.handle("edex:spotify-connect", async (event, options) => {
+        if (!trusted(event)) return null;
+        return spotifyStartAuth(options || {});
+    });
+
+    ipc.handle("edex:spotify-disconnect", async event => {
+        if (!trusted(event)) return null;
+        return spotifyDisconnect();
+    });
+
+    ipc.handle("edex:spotify-state", async event => {
+        if (!trusted(event)) return null;
+        return spotifyPlaybackState();
+    });
+
+    ipc.handle("edex:spotify-control", async (event, action, options) => {
+        if (!trusted(event)) return null;
+        return spotifyControl(String(action || ""), options || {});
     });
 
     ipc.handle("edex:diagnostics-snapshot", async event => {

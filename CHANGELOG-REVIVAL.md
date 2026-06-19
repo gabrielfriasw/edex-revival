@@ -2,7 +2,12 @@
 
 ## Unreleased
 
-No unreleased changes yet.
+## v1.0.3 - 2026-06-19
+
+- Added a Spotify Connect player widget with user-supplied Client ID setup, PKCE OAuth, encrypted token storage when Electron `safeStorage` is available, playback controls, album art proxying through the main process, and no client secret storage.
+- Added an in-app Spotify setup guide covering the user-owned Spotify Developer app, Web API selection, loopback Redirect URI, required scopes, and Client ID-only configuration.
+- Added drag-and-drop widget ordering with left/right column layout persistence in Widget Visibility.
+- Added adaptive widget sizing so the Spotify player expands when its column has available space, plus a fullscreen Spotify focus mode.
 
 ## v1.0.2 - 2026-06-18
 

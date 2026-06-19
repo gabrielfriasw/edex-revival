@@ -181,6 +181,32 @@ window.defaultAiSettings = () => ({
     }
 });
 
+window.defaultSpotifySettings = () => ({
+    enabled: false,
+    clientId: "",
+    callbackPort: 43879,
+    pollIntervalMs: 5000,
+    market: "",
+    showAlbumArt: true,
+    showDevices: true
+});
+
+window.normalizeSpotifySettings = spotify => {
+    const defaults = window.defaultSpotifySettings();
+    const source = spotify && typeof spotify === "object" && !Array.isArray(spotify) ? spotify : {};
+    const next = Object.assign({}, defaults, source);
+    next.enabled = next.enabled === true;
+    next.clientId = String(next.clientId || "").trim();
+    if (!/^[A-Za-z0-9_-]{0,128}$/.test(next.clientId)) next.clientId = "";
+    next.callbackPort = Number.isInteger(Number(next.callbackPort)) ? Math.max(1024, Math.min(65535, Number(next.callbackPort))) : defaults.callbackPort;
+    next.pollIntervalMs = Number.isInteger(Number(next.pollIntervalMs)) ? Math.max(2500, Math.min(30000, Number(next.pollIntervalMs))) : defaults.pollIntervalMs;
+    next.market = String(next.market || "").trim().toUpperCase();
+    if (next.market && !/^[A-Z]{2}$/.test(next.market)) next.market = "";
+    next.showAlbumArt = next.showAlbumArt !== false;
+    next.showDevices = next.showDevices !== false;
+    return next;
+};
+
 window.defaultPerformanceSettings = () => ({
     profile: "cinematic",
     systemInfoWorkers: 2,
@@ -364,6 +390,7 @@ window.normalizeRevivalSettings = () => {
     if (!window.settings.plugins.errors) window.settings.plugins.errors = {};
     window.settings.updates = window.normalizeUpdateSettings(window.settings.updates);
     window.settings.ai = window.normalizeAiSettings(window.settings.ai);
+    window.settings.spotify = window.normalizeSpotifySettings(window.settings.spotify);
     window.settings.ssh = window.normalizeSshSettings(window.settings.ssh);
     return window.settings;
 };
@@ -1083,6 +1110,7 @@ async function initUI() {
     window.mods.netstat = new Netstat("mod_column_right");
     window.mods.globe = new LocationGlobe("mod_column_right");
     window.mods.conninfo = new Conninfo("mod_column_right");
+    window.mods.spotify = new SpotifyPlayer("mod_column_right");
     window.applyWidgetVisibility();
 
     // Fade-in animations
@@ -1179,6 +1207,110 @@ window.themeChanger = theme => {
     }, 100);
 };
 
+window.widgetCatalog = () => ({
+    clock: {
+        label: "Clock",
+        description: "Large digital clock.",
+        element: "mod_clock",
+        module: "clock",
+        defaultColumn: "left"
+    },
+    sysinfo: {
+        label: "System status",
+        description: "Date, uptime and power state.",
+        element: "mod_sysinfo",
+        module: "sysinfo",
+        defaultColumn: "left"
+    },
+    hardware: {
+        label: "Hardware identity",
+        description: "Manufacturer/model/chassis block.",
+        element: "mod_hardwareInspector",
+        module: "hardwareInspector",
+        defaultColumn: "left"
+    },
+    cpu: {
+        label: "CPU graphs",
+        description: "CPU usage, speed and tasks.",
+        element: "mod_cpuinfo",
+        module: "cpuinfo",
+        defaultColumn: "left"
+    },
+    memory: {
+        label: "Memory graph",
+        description: "RAM and swap widget.",
+        element: "mod_ramwatcher",
+        module: "ramwatcher",
+        defaultColumn: "left"
+    },
+    processes: {
+        label: "Top processes",
+        description: "Process list widget.",
+        element: "mod_toplist",
+        module: "toplist",
+        defaultColumn: "left"
+    },
+    spotify: {
+        label: "Spotify player",
+        description: "Spotify Connect now-playing and controls.",
+        element: "mod_spotify",
+        module: "spotify",
+        defaultColumn: "right"
+    },
+    networkStatus: {
+        label: "Network status",
+        description: "Online state and ping block.",
+        element: "mod_netstat",
+        module: "netstat",
+        defaultColumn: "right"
+    },
+    globe: {
+        label: "World view",
+        description: "Network globe and endpoint map.",
+        element: "mod_globe",
+        module: "globe",
+        defaultColumn: "right"
+    },
+    networkTraffic: {
+        label: "Traffic graph",
+        description: "Upload/download graph.",
+        element: "mod_conninfo",
+        module: "conninfo",
+        defaultColumn: "right"
+    }
+});
+
+window.defaultWidgetLayout = () => ({
+    left: Object.keys(window.widgetCatalog()).filter(key => window.widgetCatalog()[key].defaultColumn === "left"),
+    right: Object.keys(window.widgetCatalog()).filter(key => window.widgetCatalog()[key].defaultColumn === "right")
+});
+
+window.normalizeWidgetLayout = layout => {
+    const catalog = window.widgetCatalog();
+    const defaults = window.defaultWidgetLayout();
+    const source = layout && typeof layout === "object" && !Array.isArray(layout) ? layout : defaults;
+    const clean = {left: [], right: []};
+    const seen = new Set();
+    ["left", "right"].forEach(column => {
+        (Array.isArray(source[column]) ? source[column] : defaults[column]).forEach(key => {
+            if (catalog[key] && !seen.has(key)) {
+                clean[column].push(key);
+                seen.add(key);
+            }
+        });
+    });
+    Object.keys(catalog).forEach(key => {
+        if (seen.has(key)) return;
+        clean[catalog[key].defaultColumn === "left" ? "left" : "right"].push(key);
+    });
+    return clean;
+};
+
+window.widgetColumnForKey = key => {
+    const layout = window.normalizeWidgetSettings().layout;
+    return layout.left.includes(key) ? "left" : "right";
+};
+
 window.defaultWidgetSettings = () => ({
     visible: true,
     keyboard: true,
@@ -1190,17 +1322,20 @@ window.defaultWidgetSettings = () => ({
     cpu: true,
     memory: true,
     processes: true,
+    spotify: false,
     networkStatus: true,
     networkTraffic: true,
     globe: true,
     globeMode: "full",
     showIp: true,
     showInterface: true,
-    showGeo: true
+    showGeo: true,
+    layout: window.defaultWidgetLayout()
 });
 
 window.normalizeWidgetSettings = () => {
     window.settings.widgets = Object.assign(window.defaultWidgetSettings(), window.settings.widgets || {});
+    window.settings.widgets.layout = window.normalizeWidgetLayout(window.settings.widgets.layout);
     if (!["full", "reduced", "offline", "hidden"].includes(window.settings.widgets.globeMode)) {
         window.settings.widgets.globeMode = "full";
     }
@@ -1211,7 +1346,7 @@ window.areWidgetsVisible = () => window.normalizeWidgetSettings().visible !== fa
 
 window.isWidgetVisible = key => {
     const widgets = window.normalizeWidgetSettings();
-    return widgets.visible !== false && widgets[key] !== false;
+    return widgets.visible !== false && widgets[key] !== false && (!window.widgetCatalog()[key] || window.isWidgetColumnEnabled(key));
 };
 
 window.__edexWindowBlurred = false;
@@ -1221,41 +1356,29 @@ window.areWidgetTimersPaused = () => {
 };
 
 window.setWidgetRuntime = (key, shouldRun) => {
-    const map = {
-        clock: "clock",
-        sysinfo: "sysinfo",
-        hardware: "hardwareInspector",
-        cpu: "cpuinfo",
-        memory: "ramwatcher",
-        processes: "toplist",
-        networkStatus: "netstat",
-        networkTraffic: "conninfo",
-        globe: "globe"
-    };
-    const mod = window.mods && window.mods[map[key]];
+    const entry = window.widgetCatalog()[key];
+    const mod = entry && window.mods && window.mods[entry.module];
     if (!mod) return false;
     if (shouldRun && typeof mod.start === "function") return mod.start();
     if (!shouldRun && typeof mod.stop === "function") return mod.stop();
     return false;
 };
 
+window.isWidgetColumnEnabled = key => {
+    const widgets = window.normalizeWidgetSettings();
+    const column = window.widgetColumnForKey(key);
+    return column === "left" ? widgets.systemPanel !== false : widgets.networkPanel !== false;
+};
+
 window.shouldStartWidgetInitially = key => {
-    const perf = window.performanceSettings();
-    if (perf.pauseHiddenWidgets === false) return true;
     const widgets = window.normalizeWidgetSettings();
     const visible = widgets.visible !== false;
-    const states = {
-        clock: visible && widgets.systemPanel !== false && widgets.clock !== false,
-        sysinfo: visible && widgets.systemPanel !== false && widgets.sysinfo !== false,
-        hardware: visible && widgets.systemPanel !== false && widgets.hardware !== false,
-        cpu: visible && widgets.systemPanel !== false && widgets.cpu !== false,
-        memory: visible && widgets.systemPanel !== false && widgets.memory !== false,
-        processes: visible && widgets.systemPanel !== false && widgets.processes !== false,
-        networkStatus: visible && widgets.networkPanel !== false && widgets.networkStatus !== false,
-        networkTraffic: visible && widgets.networkPanel !== false && widgets.networkTraffic !== false,
-        globe: visible && widgets.networkPanel !== false && widgets.globe !== false && widgets.globeMode !== "hidden" && perf.enableGlobeByDefault !== false
-    };
-    return !!states[key] && !window.areWidgetTimersPaused();
+    if (!window.widgetCatalog()[key]) return false;
+    if (key === "spotify") return visible && window.isWidgetColumnEnabled(key) && widgets.spotify !== false && !window.areWidgetTimersPaused();
+    const perf = window.performanceSettings();
+    if (perf.pauseHiddenWidgets === false) return true;
+    if (key === "globe") return visible && window.isWidgetColumnEnabled(key) && widgets.globe !== false && widgets.globeMode !== "hidden" && perf.enableGlobeByDefault !== false && !window.areWidgetTimersPaused();
+    return visible && window.isWidgetColumnEnabled(key) && widgets[key] !== false && !window.areWidgetTimersPaused();
 };
 
 window.syncWidgetLifecycles = states => {
@@ -1269,20 +1392,10 @@ window.syncWidgetLifecycles = states => {
 };
 
 window.collectWidgetRuntimeDiagnostics = () => {
-    const map = {
-        clock: "clock",
-        sysinfo: "sysinfo",
-        hardware: "hardwareInspector",
-        cpu: "cpuinfo",
-        memory: "ramwatcher",
-        processes: "toplist",
-        networkStatus: "netstat",
-        networkTraffic: "conninfo",
-        globe: "globe"
-    };
     const widgets = {};
-    Object.keys(map).forEach(key => {
-        const mod = window.mods && window.mods[map[key]];
+    const catalog = window.widgetCatalog();
+    Object.keys(catalog).forEach(key => {
+        const mod = window.mods && window.mods[catalog[key].module];
         widgets[key] = {
             constructed: !!mod,
             running: !!(mod && mod.running),
@@ -1316,41 +1429,100 @@ window.fitCurrentTerminal = () => {
     }, 350);
 };
 
+window.applyWidgetOrder = () => {
+    const widgets = window.normalizeWidgetSettings();
+    const layout = widgets.layout;
+    const catalog = window.widgetCatalog();
+    const columns = {
+        left: document.getElementById("mod_column_left"),
+        right: document.getElementById("mod_column_right")
+    };
+    ["left", "right"].forEach(column => {
+        const target = columns[column];
+        if (!target) return;
+        layout[column].forEach(key => {
+            const entry = catalog[key];
+            const element = entry && document.getElementById(entry.element);
+            if (element) target.appendChild(element);
+        });
+    });
+    return true;
+};
+
+window.syncWidgetLayoutState = states => {
+    const catalog = window.widgetCatalog();
+    const columns = {
+        left: document.getElementById("mod_column_left"),
+        right: document.getElementById("mod_column_right")
+    };
+    const visibleByColumn = {left: [], right: []};
+
+    Object.keys(catalog).forEach(key => {
+        const entry = catalog[key];
+        const element = document.getElementById(entry.element);
+        if (!element) return;
+        element.classList.remove("widget-fill", "widget-roomy", "widget-compact");
+        if (states[key]) {
+            const column = window.widgetColumnForKey(key);
+            visibleByColumn[column].push({key, element});
+        }
+    });
+
+    Object.keys(columns).forEach(column => {
+        const target = columns[column];
+        const items = visibleByColumn[column];
+        if (!target) return;
+        target.dataset.widgetCount = String(items.length);
+        target.classList.toggle("widget-column-empty", items.length === 0);
+        target.classList.toggle("widget-column-solo", items.length === 1);
+        target.classList.toggle("widget-column-roomy", items.length === 2);
+        target.classList.toggle("widget-column-dense", items.length >= 4);
+
+        items.forEach(item => {
+            const isSpotify = item.key === "spotify";
+            item.element.classList.toggle("widget-fill", isSpotify && items.length === 1);
+            item.element.classList.toggle("widget-roomy", isSpotify && items.length === 2);
+            item.element.classList.toggle("widget-compact", items.length >= 4);
+        });
+    });
+    return visibleByColumn;
+};
+
 window.applyWidgetVisibility = () => {
     const widgets = window.normalizeWidgetSettings();
     const perf = window.performanceSettings();
     const visible = widgets.visible !== false;
     const globeMode = widgets.globeMode || "full";
     const globeEnabled = perf.enableGlobeByDefault !== false;
+    const catalog = window.widgetCatalog();
     const hidden = [];
     const setHidden = (selector, hide, key) => {
-        document.querySelectorAll(selector).forEach(element => element.classList.toggle("widget-hidden", hide));
+        document.querySelectorAll(selector).forEach(element => {
+            element.classList.toggle("widget-hidden", hide);
+            element.hidden = hide;
+        });
         if (hide && key) hidden.push(key);
     };
 
+    window.applyWidgetOrder();
     setHidden("section#keyboard", !visible || widgets.keyboard === false, "keyboard");
     setHidden("section#mod_column_left", !visible || widgets.systemPanel === false, "systemPanel");
     setHidden("section#mod_column_right", !visible || widgets.networkPanel === false, "networkPanel");
-    setHidden("#mod_clock", !visible || widgets.systemPanel === false || widgets.clock === false, "clock");
-    setHidden("#mod_sysinfo", !visible || widgets.systemPanel === false || widgets.sysinfo === false, "sysinfo");
-    setHidden("#mod_hardwareInspector", !visible || widgets.systemPanel === false || widgets.hardware === false, "hardware");
-    setHidden("#mod_cpuinfo", !visible || widgets.systemPanel === false || widgets.cpu === false, "cpu");
-    setHidden("#mod_ramwatcher", !visible || widgets.systemPanel === false || widgets.memory === false, "memory");
-    setHidden("#mod_toplist", !visible || widgets.systemPanel === false || widgets.processes === false, "processes");
-    setHidden("#mod_netstat", !visible || widgets.networkPanel === false || widgets.networkStatus === false, "networkStatus");
-    setHidden("#mod_conninfo", !visible || widgets.networkPanel === false || widgets.networkTraffic === false, "networkTraffic");
-    setHidden("#mod_globe", !visible || widgets.networkPanel === false || widgets.globe === false || globeMode === "hidden" || !globeEnabled, "globe");
-    window.syncWidgetLifecycles({
-        clock: visible && widgets.systemPanel !== false && widgets.clock !== false,
-        sysinfo: visible && widgets.systemPanel !== false && widgets.sysinfo !== false,
-        hardware: visible && widgets.systemPanel !== false && widgets.hardware !== false,
-        cpu: visible && widgets.systemPanel !== false && widgets.cpu !== false,
-        memory: visible && widgets.systemPanel !== false && widgets.memory !== false,
-        processes: visible && widgets.systemPanel !== false && widgets.processes !== false,
-        networkStatus: visible && widgets.networkPanel !== false && widgets.networkStatus !== false,
-        networkTraffic: visible && widgets.networkPanel !== false && widgets.networkTraffic !== false,
-        globe: visible && widgets.networkPanel !== false && widgets.globe !== false && globeMode !== "hidden" && globeEnabled
+    const states = {};
+    Object.keys(catalog).forEach(key => {
+        const entry = catalog[key];
+        const columnEnabled = window.isWidgetColumnEnabled(key);
+        const extraHidden = key === "globe" ? (globeMode === "hidden" || !globeEnabled) : false;
+        const hide = !visible || !columnEnabled || widgets[key] === false || extraHidden;
+        setHidden(`#${entry.element}`, hide, key);
+        states[key] = !hide;
     });
+    window.syncWidgetLayoutState(states);
+    window.syncWidgetLifecycles(states);
+    if (window.mods && window.mods.spotify) {
+        if (states.spotify && !window.areWidgetTimersPaused()) window.mods.spotify.start();
+        else window.mods.spotify.stop();
+    }
 
     document.body.classList.toggle("widgets-hidden", !visible);
     document.body.classList.toggle("widgets-keyboard-hidden", !visible || widgets.keyboard === false);
@@ -1428,6 +1600,55 @@ window.setWidgetModalState = visible => {
     });
 };
 
+window.widgetModalLayout = () => ({
+    left: Array.from(document.querySelectorAll("#widgetLayout-left [data-widget-item]")).map(item => item.dataset.widgetItem),
+    right: Array.from(document.querySelectorAll("#widgetLayout-right [data-widget-item]")).map(item => item.dataset.widgetItem)
+});
+
+window.bindWidgetLayoutDnD = () => {
+    const panel = document.getElementById("widgetVisibilityPanel");
+    if (!panel) return false;
+    let dragged = null;
+    const findItem = key => Array.from(panel.querySelectorAll("[data-widget-item]")).find(item => item.dataset.widgetItem === key);
+    panel.querySelectorAll("[data-widget-item]").forEach(item => {
+        item.addEventListener("dragstart", event => {
+            dragged = item;
+            item.classList.add("dragging");
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", item.dataset.widgetItem);
+        });
+        item.addEventListener("dragend", () => {
+            item.classList.remove("dragging");
+            dragged = null;
+        });
+        item.addEventListener("dragover", event => {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "move";
+        });
+        item.addEventListener("drop", event => {
+            event.preventDefault();
+            const key = event.dataTransfer.getData("text/plain");
+            const source = dragged || findItem(key);
+            if (!source || source === item) return;
+            item.parentElement.insertBefore(source, item);
+        });
+    });
+    panel.querySelectorAll("[data-widget-list]").forEach(list => {
+        list.addEventListener("dragover", event => {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "move";
+        });
+        list.addEventListener("drop", event => {
+            event.preventDefault();
+            if (event.target.closest && event.target.closest("[data-widget-item]")) return;
+            const key = event.dataTransfer.getData("text/plain");
+            const source = dragged || findItem(key);
+            if (source) list.appendChild(source);
+        });
+    });
+    return true;
+};
+
 window.applyWidgetVisibilityFromModal = () => {
     const widgets = window.normalizeWidgetSettings();
     document.querySelectorAll("#widgetVisibilityPanel input[type='checkbox'][data-widget-key]").forEach(input => {
@@ -1436,6 +1657,7 @@ window.applyWidgetVisibilityFromModal = () => {
     widgets.visible = document.getElementById("widgetToggle-visible").checked;
     const globeMode = document.getElementById("widgetToggle-globeMode");
     if (globeMode) widgets.globeMode = globeMode.value;
+    widgets.layout = window.normalizeWidgetLayout(window.widgetModalLayout());
     window.applyWidgetVisibility();
     window.persistWidgetVisibility();
     const status = document.getElementById("widgetVisibilityStatus");
@@ -1443,14 +1665,56 @@ window.applyWidgetVisibilityFromModal = () => {
     return true;
 };
 
+window.applySpotifySoloLayout = () => {
+    const widgets = window.normalizeWidgetSettings();
+    widgets.visible = true;
+    widgets.networkPanel = true;
+    widgets.spotify = true;
+    widgets.networkStatus = false;
+    widgets.globe = false;
+    widgets.networkTraffic = false;
+    widgets.layout = window.normalizeWidgetLayout(Object.assign({}, widgets.layout || {}, {
+        right: ["spotify", "networkStatus", "globe", "networkTraffic"]
+    }));
+    window.applyWidgetVisibility();
+    window.persistWidgetVisibility();
+    const panel = document.getElementById("widgetVisibilityPanel");
+    if (panel) {
+        const visible = document.getElementById("widgetToggle-visible");
+        if (visible) visible.checked = true;
+        ["spotify", "networkPanel"].forEach(key => {
+            panel.querySelectorAll(`input[data-widget-key='${key}']`).forEach(input => input.checked = true);
+        });
+        ["networkStatus", "globe", "networkTraffic"].forEach(key => {
+            panel.querySelectorAll(`input[data-widget-key='${key}']`).forEach(input => input.checked = false);
+        });
+        const status = document.getElementById("widgetVisibilityStatus");
+        if (status) status.textContent = "Spotify solo layout saved at "+new Date().toTimeString();
+    }
+    return true;
+};
+
 window.openWidgetVisibility = () => {
     if (document.getElementById("widgetVisibilityPanel")) return;
     const widgets = window.normalizeWidgetSettings();
+    const catalog = window.widgetCatalog();
+    const layout = widgets.layout;
     const row = (key, label, description) => `
         <label class="widget_visibility_row">
             <input type="checkbox" data-widget-key="${key}" ${widgets[key] !== false ? "checked" : ""}>
             <span><strong>${label}</strong><em>${description}</em></span>
         </label>`;
+    const widgetItem = key => {
+        const entry = catalog[key];
+        if (!entry) return "";
+        return `<div class="widget_layout_item" draggable="true" data-widget-item="${key}">
+            <span class="widget_drag_handle" title="Drag to reorder">::</span>
+            <label>
+                <input type="checkbox" data-widget-key="${key}" ${widgets[key] !== false ? "checked" : ""}>
+                <span><strong>${entry.label}</strong><em>${entry.description}</em></span>
+            </label>
+        </div>`;
+    };
 
     new Modal({
         type: "custom",
@@ -1464,25 +1728,22 @@ window.openWidgetVisibility = () => {
             </div>
             <div class="widget_visibility_grid">
                 <section>
-                    <h4>Layout</h4>
+                    <h4>Layout Toggles</h4>
                     ${row("keyboard", "Keyboard", "On-screen keyboard at the bottom.")}
-                    ${row("systemPanel", "System panel", "Left column container.")}
-                    ${row("networkPanel", "Network panel", "Right column container.")}
+                    ${row("systemPanel", "Left panel", "Left widget column.")}
+                    ${row("networkPanel", "Right panel", "Right widget column.")}
                 </section>
-                <section>
-                    <h4>System Widgets</h4>
-                    ${row("clock", "Clock", "Large digital clock.")}
-                    ${row("sysinfo", "System status", "Date, uptime and power state.")}
-                    ${row("hardware", "Hardware identity", "Manufacturer/model/chassis block.")}
-                    ${row("cpu", "CPU graphs", "CPU usage, speed and tasks.")}
-                    ${row("memory", "Memory graph", "RAM and swap widget.")}
-                    ${row("processes", "Top processes", "Process list widget.")}
+                <section class="widget_layout_section">
+                    <h4>Left Column</h4>
+                    <div id="widgetLayout-left" class="widget_layout_list" data-widget-list="left">
+                        ${layout.left.map(widgetItem).join("")}
+                    </div>
                 </section>
-                <section>
-                    <h4>Network Widgets</h4>
-                    ${row("networkStatus", "Network status", "Online state and ping block.")}
-                    ${row("networkTraffic", "Traffic graph", "Upload/download graph.")}
-                    ${row("globe", "World view", "Network globe and endpoint map.")}
+                <section class="widget_layout_section">
+                    <h4>Right Column</h4>
+                    <div id="widgetLayout-right" class="widget_layout_list" data-widget-list="right">
+                        ${layout.right.map(widgetItem).join("")}
+                    </div>
                     <label class="widget_visibility_row select_row">
                         <span><strong>World view mode</strong><em>Full, reduced, offline or hidden.</em></span>
                         <select id="widgetToggle-globeMode">
@@ -1504,11 +1765,13 @@ window.openWidgetVisibility = () => {
             <h6 id="widgetVisibilityStatus">Loaded current visibility settings</h6>
         </div>`,
         buttons: [
+            {label: "Spotify Solo", action: "window.applySpotifySoloLayout();"},
             {label: "Show All", action: "window.setWidgetModalState(true);document.getElementById('widgetToggle-visible').checked=true;"},
             {label: "Hide All", action: "window.setWidgetModalState(false);document.getElementById('widgetToggle-visible').checked=false;"},
             {label: "Save", action: "window.applyWidgetVisibilityFromModal();"}
         ]
     });
+    setTimeout(window.bindWidgetLayoutDnD, 0);
 };
 
 window.remakeKeyboard = layout => {
@@ -1662,6 +1925,8 @@ window.openSettings = async () => {
     let launcherRailSettings = Object.assign(window.defaultLauncherRailSettings(), window.settings.launcherRail || {});
     let performanceSettings = window.performanceSettings();
     let updateSettings = window.normalizeUpdateSettings(window.settings.updates || {});
+    let spotifySettings = window.normalizeSpotifySettings(window.settings.spotify || {});
+    let spotifyRedirectUri = `http://127.0.0.1:${spotifySettings.callbackPort}/spotify/callback`;
 
     // Unlink the tactile keyboard from the terminal emulator to allow filling in the settings fields
     window.keyboard.detach();
@@ -2060,6 +2325,14 @@ window.openSettings = async () => {
                         </select></td>
                     </tr>
                     <tr>
+                        <td>widgets.spotify</td>
+                        <td>Show Spotify Connect player widget</td>
+                        <td><select id="settingsEditor-widgets-spotify">
+                            <option>${widgetSettings.spotify !== false}</option>
+                            <option>${widgetSettings.spotify === false}</option>
+                        </select></td>
+                    </tr>
+                    <tr>
                         <td>widgets.networkStatus</td>
                         <td>Show network status widget</td>
                         <td><select id="settingsEditor-widgets-networkStatus">
@@ -2156,6 +2429,83 @@ window.openSettings = async () => {
                         <td><select id="settingsEditor-updates-installOnQuit">
                             <option>${updateSettings.installOnQuit === true}</option>
                             <option>${updateSettings.installOnQuit !== true}</option>
+                        </select></td>
+                    </tr>
+                    <tr>
+                        <td>spotify.setup</td>
+                        <td colspan="2">
+                            <div class="spotify_settings_guide">
+                                <div class="spotify_settings_guide_head">
+                                    <strong>User-owned Spotify setup</strong>
+                                    <span>Each user must create their own Spotify Developer app. eDEX stores only the Client ID and OAuth tokens; never paste a Client Secret.</span>
+                                </div>
+                                <ol>
+                                    <li>Open Spotify Developer Dashboard and create a new app for your local eDEX install.</li>
+                                    <li>When Spotify asks which APIs or SDKs you plan to use, select <b>Web API</b> only.</li>
+                                    <li>In the Spotify app settings, add this exact Redirect URI:</li>
+                                </ol>
+                                <div class="spotify_redirect_copy">
+                                    <input type="text" id="settingsEditor-spotify-redirectUri" value="${window._escapeHtml(spotifyRedirectUri)}" readonly>
+                                    <button type="button" data-settings-spotify-action="copy-redirect">Copy URI</button>
+                                </div>
+                                <ol start="4">
+                                    <li>Copy the app's Client ID into <b>spotify.clientId</b>. Do not use the Client Secret.</li>
+                                    <li>Set <b>spotify.enabled</b> to true, save, reload eDEX, then connect from the Spotify widget.</li>
+                                </ol>
+                                <div class="spotify_scope_notes">
+                                    <span>Scopes requested: user-read-playback-state, user-read-currently-playing, user-modify-playback-state.</span>
+                                    <span>Spotify Premium may be required by Spotify for some playback control behavior.</span>
+                                </div>
+                                <div class="spotify_settings_actions">
+                                    <button type="button" data-settings-spotify-action="dashboard">Open Dashboard</button>
+                                    <button type="button" data-settings-spotify-action="pkce-docs">PKCE Docs</button>
+                                    <button type="button" data-settings-spotify-action="scope-docs">Scope Docs</button>
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>spotify.enabled</td>
+                        <td>Enable the Spotify Web API integration after the user supplies their own Client ID</td>
+                        <td><select id="settingsEditor-spotify-enabled">
+                            <option>${spotifySettings.enabled === true}</option>
+                            <option>${spotifySettings.enabled !== true}</option>
+                        </select></td>
+                    </tr>
+                    <tr>
+                        <td>spotify.clientId</td>
+                        <td>User-owned Spotify app Client ID. Use Authorization Code with PKCE; never enter a Client Secret.</td>
+                        <td><input type="text" id="settingsEditor-spotify-clientId" value="${window._escapeHtml(spotifySettings.clientId || "")}"></td>
+                    </tr>
+                    <tr>
+                        <td>spotify.callbackPort</td>
+                        <td>Loopback callback port. The Redirect URI preview above must match Spotify Dashboard exactly.</td>
+                        <td><input type="number" id="settingsEditor-spotify-callbackPort" value="${spotifySettings.callbackPort}" min="1024" max="65535"></td>
+                    </tr>
+                    <tr>
+                        <td>spotify.pollIntervalMs</td>
+                        <td>Milliseconds between player state refreshes</td>
+                        <td><input type="number" id="settingsEditor-spotify-pollIntervalMs" value="${spotifySettings.pollIntervalMs}" min="2500" max="30000"></td>
+                    </tr>
+                    <tr>
+                        <td>spotify.market</td>
+                        <td>Optional two-letter market code for playable track data</td>
+                        <td><input type="text" id="settingsEditor-spotify-market" value="${window._escapeHtml(spotifySettings.market || "")}" maxlength="2"></td>
+                    </tr>
+                    <tr>
+                        <td>spotify.showAlbumArt</td>
+                        <td>Download current album art through the main process and render it as a local data URL</td>
+                        <td><select id="settingsEditor-spotify-showAlbumArt">
+                            <option>${spotifySettings.showAlbumArt !== false}</option>
+                            <option>${spotifySettings.showAlbumArt === false}</option>
+                        </select></td>
+                    </tr>
+                    <tr>
+                        <td>spotify.showDevices</td>
+                        <td>Fetch Spotify Connect device state for active device and volume data</td>
+                        <td><select id="settingsEditor-spotify-showDevices">
+                            <option>${spotifySettings.showDevices !== false}</option>
+                            <option>${spotifySettings.showDevices === false}</option>
                         </select></td>
                     </tr>
                     <tr${aiSettingsHidden}>
@@ -2395,6 +2745,7 @@ window.settingsSectionForKey = key => {
     if (/^devExplorer\.|^hideDotfiles$|^fsListView$/.test(key)) return "explorer";
     if (/^editor\./.test(key)) return "editor";
     if (/^ai\./.test(key)) return "ai";
+    if (/^spotify\./.test(key)) return "spotify";
     if (/^widgets\./.test(key)) return "widgets";
     if (/^updates\./.test(key)) return "updates";
     if (/^privacy\./.test(key)) return "privacy";
@@ -2418,6 +2769,7 @@ window.enhanceSettingsEditor = () => {
         ["explorer", "File Explorer"],
         ["editor", "Editor"],
         ["widgets", "Widgets"],
+        ["spotify", "Spotify"],
         ["updates", "Updates"],
         ["privacy", "Privacy"],
         ["performance", "Performance"],
@@ -2495,8 +2847,60 @@ window.enhanceSettingsEditor = () => {
     if (testShellButton) {
         testShellButton.addEventListener("click", () => window.testSettingsShell());
     }
+    table.addEventListener("click", event => {
+        const button = event.target.closest("button[data-settings-spotify-action]");
+        if (!button) return;
+        event.preventDefault();
+        window.handleSpotifySettingsAction(button.dataset.settingsSpotifyAction);
+    });
+    const spotifyPortInput = document.getElementById("settingsEditor-spotify-callbackPort");
+    if (spotifyPortInput) {
+        spotifyPortInput.addEventListener("input", () => window.updateSpotifySettingsRedirectUri());
+        window.updateSpotifySettingsRedirectUri();
+    }
 
     activate("general");
+};
+
+window.currentSpotifySettingsRedirectUri = () => {
+    const port = Number(window.settingsEditorValue("settingsEditor-spotify-callbackPort"));
+    const safePort = Number.isInteger(port) && port >= 1024 && port <= 65535
+        ? port
+        : window.defaultSpotifySettings().callbackPort;
+    return `http://127.0.0.1:${safePort}/spotify/callback`;
+};
+
+window.updateSpotifySettingsRedirectUri = () => {
+    const input = document.getElementById("settingsEditor-spotify-redirectUri");
+    const uri = window.currentSpotifySettingsRedirectUri();
+    if (input) input.value = uri;
+    return uri;
+};
+
+window.handleSpotifySettingsAction = action => {
+    const status = document.getElementById("settingsEditorStatus");
+    if (action === "dashboard") {
+        edex.openExternal("https://developer.spotify.com/dashboard");
+        if (status) status.innerText = "Opened Spotify Developer Dashboard in your browser.";
+        return true;
+    }
+    if (action === "pkce-docs") {
+        edex.openExternal("https://developer.spotify.com/documentation/web-api/tutorials/code-pkce-flow");
+        if (status) status.innerText = "Opened Spotify PKCE documentation in your browser.";
+        return true;
+    }
+    if (action === "scope-docs") {
+        edex.openExternal("https://developer.spotify.com/documentation/web-api/concepts/scopes");
+        if (status) status.innerText = "Opened Spotify scopes documentation in your browser.";
+        return true;
+    }
+    if (action === "copy-redirect") {
+        const uri = window.updateSpotifySettingsRedirectUri();
+        edex.clipboard.writeText(uri);
+        if (status) status.innerText = `Copied Spotify Redirect URI: ${uri}`;
+        return true;
+    }
+    return false;
 };
 
 window.testSettingsShell = async () => {
@@ -2592,6 +2996,13 @@ window.settingsEditorDefaults = () => Object.assign({
     "updates.checkOnStartup": true,
     "updates.autoDownload": true,
     "updates.installOnQuit": true,
+    "spotify.enabled": false,
+    "spotify.clientId": "",
+    "spotify.callbackPort": 43879,
+    "spotify.pollIntervalMs": 5000,
+    "spotify.market": "",
+    "spotify.showAlbumArt": true,
+    "spotify.showDevices": true,
     audio: true,
     audioVolume: 1,
     disableFeedbackAudio: false,
@@ -2787,6 +3198,8 @@ window.validateSettingsEditor = () => {
     integerInRange("settingsEditor-performance-maxSystemInfoWorkers", "Maximum system information workers", 1, 4);
     integerInRange("settingsEditor-performance-systemInfoWorkerIdleMs", "System information worker idle timeout", 5000, 300000);
     integerInRange("settingsEditor-performance-systemInfoWorkerScaleDelayMs", "System information worker scale delay", 100, 60000);
+    integerInRange("settingsEditor-spotify-callbackPort", "Spotify callback port", 1024, 65535);
+    integerInRange("settingsEditor-spotify-pollIntervalMs", "Spotify polling interval", 2500, 30000);
     floatInRange("settingsEditor-audioVolume", "Audio volume", 0, 1);
     integerInRange("settingsEditor-editor-fontSize", "Editor font size", 8, 72);
     integerInRange("settingsEditor-editor-tabSize", "Editor tab size", 1, 16);
@@ -2833,6 +3246,18 @@ window.validateSettingsEditor = () => {
 
     if (window.settingsEditorValue("settingsEditor-ai-enabled") === "true") {
         warnings.push("Error to Fix is enabled; terminal diagnostics may be sent to the selected local CLI provider after redaction.");
+    }
+
+    const spotifyClientId = value("settingsEditor-spotify-clientId");
+    if (spotifyClientId && !/^[A-Za-z0-9_-]{8,128}$/.test(spotifyClientId)) {
+        errors.push("Spotify Client ID contains invalid characters.");
+    }
+    const spotifyMarket = value("settingsEditor-spotify-market");
+    if (spotifyMarket && !/^[A-Za-z]{2}$/.test(spotifyMarket)) {
+        errors.push("Spotify market must be a two-letter country code or empty.");
+    }
+    if (value("settingsEditor-spotify-enabled") === "true" && !spotifyClientId) {
+        warnings.push("Spotify is enabled but no Client ID is configured yet.");
     }
 
     return {
@@ -2914,6 +3339,15 @@ window.writeSettingsFile = () => {
             autoDownload: (document.getElementById("settingsEditor-updates-autoDownload").value === "true"),
             installOnQuit: (document.getElementById("settingsEditor-updates-installOnQuit").value === "true")
         },
+        spotify: {
+            enabled: (document.getElementById("settingsEditor-spotify-enabled").value === "true"),
+            clientId: document.getElementById("settingsEditor-spotify-clientId").value.trim(),
+            callbackPort: Number(document.getElementById("settingsEditor-spotify-callbackPort").value),
+            pollIntervalMs: Number(document.getElementById("settingsEditor-spotify-pollIntervalMs").value),
+            market: document.getElementById("settingsEditor-spotify-market").value.trim().toUpperCase(),
+            showAlbumArt: (document.getElementById("settingsEditor-spotify-showAlbumArt").value === "true"),
+            showDevices: (document.getElementById("settingsEditor-spotify-showDevices").value === "true")
+        },
         ai: {
             enabled: (document.getElementById("settingsEditor-ai-enabled").value === "true"),
             provider: document.getElementById("settingsEditor-ai-defaultProvider").value,
@@ -2976,13 +3410,15 @@ window.writeSettingsFile = () => {
             cpu: (document.getElementById("settingsEditor-widgets-cpu").value === "true"),
             memory: (document.getElementById("settingsEditor-widgets-memory").value === "true"),
             processes: (document.getElementById("settingsEditor-widgets-processes").value === "true"),
+            spotify: (document.getElementById("settingsEditor-widgets-spotify").value === "true"),
             networkStatus: (document.getElementById("settingsEditor-widgets-networkStatus").value === "true"),
             networkTraffic: (document.getElementById("settingsEditor-widgets-networkTraffic").value === "true"),
             globe: (document.getElementById("settingsEditor-widgets-globe").value === "true"),
             globeMode: document.getElementById("settingsEditor-widgets-globeMode").value,
             showIp: (document.getElementById("settingsEditor-widgets-showIp").value === "true"),
             showInterface: (document.getElementById("settingsEditor-widgets-showInterface").value === "true"),
-            showGeo: (document.getElementById("settingsEditor-widgets-showGeo").value === "true")
+            showGeo: (document.getElementById("settingsEditor-widgets-showGeo").value === "true"),
+            layout: window.normalizeWidgetLayout(window.settings.widgets && window.settings.widgets.layout)
         }),
         forceFullscreen: window.settings.forceFullscreen,
         keepGeometry: (document.getElementById("settingsEditor-keepGeometry").value === "true"),

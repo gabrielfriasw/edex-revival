@@ -163,7 +163,7 @@ function safeRequire(request) {
     if (!inApp && !inUserData) throw new Error(`Blocked renderer require: ${request}`);
 
     if (resolved.endsWith(".json")) {
-        return JSON.parse(fs.readFileSync(resolved, "utf-8"));
+        return JSON.parse(fs.readFileSync(resolved, "utf-8").replace(/^\uFEFF/, ""));
     }
     if (resolved.endsWith(".js")) {
         return appRequire(resolved);
@@ -484,6 +484,14 @@ contextBridge.exposeInMainWorld("edex", {
             ipcRenderer.on("edex:update-event", listener);
             return () => ipcRenderer.removeListener("edex:update-event", listener);
         }
+    },
+    spotify: {
+        status: () => ipcRenderer.invoke("edex:spotify-status"),
+        configure: options => ipcRenderer.invoke("edex:spotify-configure", options || {}),
+        connect: options => ipcRenderer.invoke("edex:spotify-connect", options || {}),
+        disconnect: () => ipcRenderer.invoke("edex:spotify-disconnect"),
+        state: () => ipcRenderer.invoke("edex:spotify-state"),
+        control: (action, options) => ipcRenderer.invoke("edex:spotify-control", action, options || {})
     },
     setVisualZoomLevelLimits: (minimum, maximum) => webFrame.setVisualZoomLevelLimits(minimum, maximum),
     startup: {

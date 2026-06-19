@@ -1,22 +1,45 @@
 section.mod_column {
     width: 17%;
     top: 2.5vh;
+    bottom: 1.2vh;
+    height: auto;
     min-height: 10%;
-    max-height: 96%;
+    max-height: calc(100vh - 3.7vh);
     padding: 1.39vh;
     padding-bottom: 0vh;
     box-sizing: border-box;
     position: absolute;
+    z-index: 180;
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
+    justify-content: flex-start;
+    gap: 0.85vh;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-width: thin;
 
     opacity: 0;
+    pointer-events: auto;
     transition: opacity .5s cubic-bezier(0.4, 0, 1, 1);
 }
 
 section.mod_column.activated {
     opacity: 1;
+}
+
+section.mod_column [hidden],
+section.mod_column > div[hidden] {
+    display: none !important;
+}
+
+body:not(.widgets-keyboard-hidden) section.mod_column {
+    bottom: 30vh;
+    max-height: calc(100vh - 32.5vh);
+}
+
+body.spotify-focus-mode section.mod_column.spotify-fullscreen-host {
+    z-index: 34010;
+    overflow: visible;
 }
 
 section.mod_column > h3.title {
@@ -26,6 +49,8 @@ section.mod_column > h3.title {
 
 section.mod_column > div {
     width: 100%;
+    box-sizing: border-box;
+    align-self: stretch;
     opacity: 0;
     animation-name: fadeIn;
     animation-duration: .5s;
@@ -34,6 +59,21 @@ section.mod_column > div {
     animation-iteration-count: 1;
     animation-fill-mode: forwards;
     animation-play-state: paused;
+}
+
+section.mod_column > div.widget-fill {
+    flex: 1 1 100%;
+    height: 100%;
+    min-height: 0;
+    max-height: 100%;
+}
+
+section.mod_column > div.widget-roomy {
+    flex: 0 0 auto;
+}
+
+section.mod_column > div.widget-compact {
+    flex: 0 1 auto;
 }
 
 @keyframes fadeIn {

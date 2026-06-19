@@ -46,6 +46,10 @@ This file is the execution checkpoint for the Revival work. Always read it befor
 - [x] Layout presets, auto-hide launcher header, Revival themes, smart editor open behavior, globe modes, shell test, plugin docs/examples, and Revival release docs are in place.
 - [x] Native SSH profiles open terminal tabs without storing passwords and include keepalive/auth/key-agent controls plus guided key setup and key-login diagnostics.
 - [x] Error to Fix turns the latest terminal diagnostic into an editable Codex/Claude prompt when AI is enabled.
+- [x] Spotify Connect player widget exists with user-owned Client ID setup, PKCE OAuth, main-process API calls, playback controls, and encrypted token persistence when available.
+- [x] Settings Center includes a Spotify setup guide for Web API selection, loopback Redirect URI, scopes, and no-Client-Secret PKCE configuration.
+- [x] Widget Visibility supports drag-and-drop ordering between left and right widget columns.
+- [x] Widget columns apply adaptive density states so Spotify can expand into available space, including fullscreen focus mode.
 
 ## Phase 1: Base, Security, Stability
 
@@ -105,6 +109,8 @@ This file is the execution checkpoint for the Revival work. Always read it befor
 - [x] Add layout presets: Classic, Minimal, Developer, Privacy, Cinematic.
 - [x] Persist window positions/layout presets for internal windows.
 - [x] Add a compact launcher header that avoids keyboard, side panels, and network widgets at all supported sizes.
+- [x] Add drag-and-drop widget ordering and persisted widget column layout.
+- [x] Add adaptive widget sizing for sparse columns and Spotify fullscreen focus mode.
 
 ## Phase 6: Terminal and Shell
 
@@ -134,6 +140,7 @@ This file is the execution checkpoint for the Revival work. Always read it befor
 - [x] Add local diagnostics panel for network-adjacent settings, shell, GPU, filesystem permissions, and startup registration.
 - [x] Add reduced/offline globe mode for privacy and low GPU systems.
 - [x] Add terminal Error to Fix flow for Codex/Claude handoff without showing AI controls when disabled.
+- [x] Add Spotify Connect player widget for now-playing, playback controls, volume, album art proxying, adaptive sizing, fullscreen focus mode, and user-owned Web API setup.
 
 ## Phase 9: Touch, HiDPI, Responsiveness
 
@@ -162,4 +169,4 @@ This file is the execution checkpoint for the Revival work. Always read it befor
 
 ## Next Implementation Cursor
 
-Next pass: optional touch-friendly sizing and final release polish. LSP/debugger/marketplace work remains out of scope for this Revival UX package unless explicitly prioritized later.
+Next pass: optional touch-friendly sizing and final release polish. Spotify Web Playback SDK device/streaming mode, LSP/debugger, and marketplace work remain out of scope for this Revival UX package unless explicitly prioritized later.

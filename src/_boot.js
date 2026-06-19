@@ -125,6 +125,7 @@ const defaultSettings = {
         cpu: true,
         memory: true,
         processes: true,
+        spotify: false,
         networkStatus: true,
         networkTraffic: true,
         globe: true,
@@ -159,8 +160,12 @@ function mergeSettingsDefaults(target, defaults) {
     return target;
 }
 
+function readJsonFile(file) {
+    return JSON.parse(fs.readFileSync(file, "utf-8").replace(/^\uFEFF/, ""));
+}
+
 function readSettingsFile() {
-    return JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
+    return readJsonFile(settingsFile);
 }
 
 function isTrustedSender(event) {
