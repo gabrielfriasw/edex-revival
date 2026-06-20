@@ -1,4 +1,10 @@
 div#mod_spotify {
+    --spotify_palette_bg: 2, 4, 5;
+    --spotify_palette_bg_alt: 8, 12, 14;
+    --spotify_palette_accent: var(--color_r), var(--color_g), var(--color_b);
+    --spotify_palette_muted: var(--color_r), var(--color_g), var(--color_b);
+    --spotify_palette_text: 238, 248, 246;
+    --spotify_palette_button_text: 4, 8, 10;
     position: relative;
     z-index: 180;
     min-height: 174px;
@@ -10,6 +16,7 @@ div#mod_spotify {
     box-sizing: border-box;
     overflow: hidden;
     pointer-events: auto;
+    transition: background 520ms ease, border-color 520ms ease, box-shadow 520ms ease, color 420ms ease;
 }
 
 body.secondary-display[data-secondary-orientation="portrait"].spotify-focus-mode div#mod_spotify.spotify_fullscreen .spotify_player {
@@ -60,6 +67,51 @@ div#mod_spotify::after {
     border-top: 2px solid rgba(255, 255, 255, 0.12);
     border-left: 2px solid rgba(var(--color_r), var(--color_g), var(--color_b), 0.32);
     opacity: 0.9;
+}
+
+div#mod_spotify.spotify_palette_dynamic {
+    border-color: rgba(var(--spotify_palette_accent), 0.62);
+    background:
+        linear-gradient(135deg, rgba(var(--spotify_palette_bg), 0.92), rgba(var(--spotify_palette_bg_alt), 0.76)),
+        linear-gradient(90deg, rgba(var(--spotify_palette_accent), 0.12), rgba(255, 255, 255, 0.025));
+    box-shadow: inset 0 0 22px rgba(var(--spotify_palette_accent), 0.13), 0 0 18px rgba(0, 0, 0, 0.38);
+    color: rgb(var(--spotify_palette_text));
+}
+
+div#mod_spotify.spotify_palette_dynamic::before {
+    background:
+        linear-gradient(rgba(var(--spotify_palette_muted), 0.1) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(var(--spotify_palette_accent), 0.07) 1px, transparent 1px);
+    background-size: 18px 18px;
+}
+
+div#mod_spotify.spotify_palette_dynamic::after {
+    border-left-color: rgba(var(--spotify_palette_accent), 0.36);
+}
+
+div#mod_spotify.spotify_palette_dynamic h1 {
+    border-bottom-color: rgba(var(--spotify_palette_accent), 0.38);
+}
+
+div#mod_spotify.spotify_palette_dynamic .spotify_header_controls button,
+div#mod_spotify.spotify_palette_dynamic .spotify_controls button,
+div#mod_spotify.spotify_palette_dynamic .spotify_actions button {
+    border-color: rgba(var(--spotify_palette_accent), 0.58);
+    background: rgba(var(--spotify_palette_bg), 0.48);
+    color: rgb(var(--spotify_palette_accent));
+}
+
+div#mod_spotify.spotify_palette_dynamic .spotify_header_controls button:hover,
+div#mod_spotify.spotify_palette_dynamic .spotify_header_controls button:focus,
+div#mod_spotify.spotify_palette_dynamic .spotify_controls button:hover,
+div#mod_spotify.spotify_palette_dynamic .spotify_actions button:hover {
+    background: rgba(var(--spotify_palette_accent), 0.18);
+}
+
+div#mod_spotify.spotify_palette_dynamic .spotify_controls button.primary {
+    background: rgb(var(--spotify_palette_accent));
+    color: rgb(var(--spotify_palette_button_text));
+    box-shadow: 0 0 22px rgba(var(--spotify_palette_accent), 0.34);
 }
 
 div#mod_spotify_inner {
@@ -234,6 +286,36 @@ div#mod_spotify_body {
     background: rgba(255, 255, 255, 0.28);
 }
 
+div#mod_spotify.spotify_palette_dynamic .spotify_setup input,
+div#mod_spotify.spotify_palette_dynamic .spotify_progress input,
+div#mod_spotify.spotify_palette_dynamic .spotify_volume input {
+    border-color: rgba(var(--spotify_palette_accent), 0.56);
+    color: rgb(var(--spotify_palette_accent));
+    accent-color: rgb(var(--spotify_palette_accent));
+}
+
+div#mod_spotify.spotify_palette_dynamic .spotify_progress input[type="range"],
+div#mod_spotify.spotify_palette_dynamic .spotify_volume input[type="range"] {
+    background: rgba(var(--spotify_palette_text), 0.26);
+}
+
+div#mod_spotify.spotify_palette_dynamic .spotify_progress input[type="range"]::-webkit-slider-thumb,
+div#mod_spotify.spotify_palette_dynamic .spotify_volume input[type="range"]::-webkit-slider-thumb {
+    background: rgb(var(--spotify_palette_accent));
+    box-shadow: 0 0 16px rgba(var(--spotify_palette_accent), 0.38);
+}
+
+div#mod_spotify.spotify_palette_dynamic .spotify_progress input[type="range"]::-moz-range-thumb,
+div#mod_spotify.spotify_palette_dynamic .spotify_volume input[type="range"]::-moz-range-thumb {
+    background: rgb(var(--spotify_palette_accent));
+    box-shadow: 0 0 16px rgba(var(--spotify_palette_accent), 0.38);
+}
+
+div#mod_spotify.spotify_palette_dynamic .spotify_progress input[type="range"]::-moz-range-track,
+div#mod_spotify.spotify_palette_dynamic .spotify_volume input[type="range"]::-moz-range-track {
+    background: rgba(var(--spotify_palette_text), 0.26);
+}
+
 .spotify_empty {
     min-height: 122px;
     align-content: center;
@@ -301,6 +383,26 @@ div#mod_spotify_body {
     mix-blend-mode: screen;
 }
 
+div#mod_spotify.spotify_palette_dynamic .spotify_art_shell {
+    border-color: rgba(var(--spotify_palette_accent), 0.36);
+    background: rgba(var(--spotify_palette_accent), 0.08);
+    box-shadow: inset 0 0 14px rgba(var(--spotify_palette_accent), 0.12);
+}
+
+div#mod_spotify.spotify_palette_dynamic .spotify_art_shell::before {
+    border-color: rgba(var(--spotify_palette_muted), 0.28);
+}
+
+div#mod_spotify.spotify_palette_dynamic .spotify_art {
+    background-color: rgba(var(--spotify_palette_accent), 0.1);
+}
+
+div#mod_spotify.spotify_palette_dynamic .spotify_art_grid {
+    background:
+        linear-gradient(rgba(var(--spotify_palette_accent), 0.15) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(var(--spotify_palette_muted), 0.14) 1px, transparent 1px);
+}
+
 .spotify_meta {
     min-width: 0;
     display: grid;
@@ -318,6 +420,18 @@ div#mod_spotify_body {
     line-height: 1;
     letter-spacing: 0;
     white-space: pre;
+}
+
+div#mod_spotify.spotify_palette_dynamic .spotify_ascii_title,
+div#mod_spotify.spotify_palette_dynamic .spotify_volume_icon {
+    color: rgb(var(--spotify_palette_accent));
+}
+
+div#mod_spotify.spotify_palette_dynamic .spotify_meta strong,
+div#mod_spotify.spotify_palette_dynamic .spotify_meta span,
+div#mod_spotify.spotify_palette_dynamic .spotify_meta em,
+div#mod_spotify.spotify_palette_dynamic .spotify_progress {
+    color: rgb(var(--spotify_palette_text));
 }
 
 .spotify_meta strong,
@@ -812,6 +926,64 @@ body.spotify-focus-mode div#mod_spotify.spotify_fullscreen .spotify_empty strong
 
 body.spotify-focus-mode div#mod_spotify.spotify_fullscreen .spotify_empty span {
     font-size: 12px;
+}
+
+body.spotify-focus-mode.spotify_palette_dynamic::before {
+    background: rgb(var(--spotify_palette_bg));
+}
+
+body.spotify-focus-mode div#mod_spotify.spotify_fullscreen.spotify_palette_dynamic {
+    background:
+        linear-gradient(90deg, rgba(var(--spotify_palette_accent), 0.14), transparent 38%, rgba(var(--spotify_palette_muted), 0.18)),
+        linear-gradient(135deg, rgb(var(--spotify_palette_bg)), rgb(var(--spotify_palette_bg_alt)) 58%, rgb(2, 4, 5));
+    color: rgb(var(--spotify_palette_text));
+}
+
+body.spotify-focus-mode div#mod_spotify.spotify_fullscreen.spotify_palette_dynamic::before {
+    background:
+        linear-gradient(rgba(var(--spotify_palette_accent), 0.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(var(--spotify_palette_muted), 0.04) 1px, transparent 1px);
+}
+
+body.spotify-focus-mode div#mod_spotify.spotify_fullscreen.spotify_palette_dynamic h1 {
+    border-bottom-color: rgba(var(--spotify_palette_accent), 0.22);
+}
+
+body.spotify-focus-mode div#mod_spotify.spotify_fullscreen.spotify_palette_dynamic .spotify_art_shell {
+    border-color: rgba(var(--spotify_palette_accent), 0.18);
+    background: rgb(var(--spotify_palette_bg_alt));
+    box-shadow: 0 24px 90px rgba(0, 0, 0, 0.54), 0 0 46px rgba(var(--spotify_palette_accent), 0.16);
+}
+
+body.spotify-focus-mode div#mod_spotify.spotify_fullscreen.spotify_palette_dynamic .spotify_ascii_title {
+    color: rgb(var(--spotify_palette_accent));
+    text-shadow: 0 0 20px rgba(var(--spotify_palette_accent), 0.24);
+}
+
+body.spotify-focus-mode div#mod_spotify.spotify_fullscreen.spotify_palette_dynamic .spotify_meta strong,
+body.spotify-focus-mode div#mod_spotify.spotify_fullscreen.spotify_palette_dynamic .spotify_meta span,
+body.spotify-focus-mode div#mod_spotify.spotify_fullscreen.spotify_palette_dynamic .spotify_meta em,
+body.spotify-focus-mode div#mod_spotify.spotify_fullscreen.spotify_palette_dynamic .spotify_progress,
+body.spotify-focus-mode div#mod_spotify.spotify_fullscreen.spotify_palette_dynamic .spotify_empty {
+    color: rgb(var(--spotify_palette_text));
+}
+
+body.spotify-focus-mode div#mod_spotify.spotify_fullscreen.spotify_palette_dynamic .spotify_header_controls button,
+body.spotify-focus-mode div#mod_spotify.spotify_fullscreen.spotify_palette_dynamic .spotify_controls button,
+body.spotify-focus-mode div#mod_spotify.spotify_fullscreen.spotify_palette_dynamic .spotify_actions button {
+    border-color: rgba(var(--spotify_palette_accent), 0.62);
+    background: rgba(var(--spotify_palette_bg), 0.48);
+    color: rgb(var(--spotify_palette_accent));
+}
+
+body.spotify-focus-mode div#mod_spotify.spotify_fullscreen.spotify_palette_dynamic .spotify_controls button.primary {
+    background: rgb(var(--spotify_palette_accent));
+    color: rgb(var(--spotify_palette_button_text));
+    box-shadow: 0 0 34px rgba(var(--spotify_palette_accent), 0.38);
+}
+
+body.spotify-focus-mode div#mod_spotify.spotify_fullscreen.spotify_palette_dynamic .spotify_volume_icon {
+    color: rgb(var(--spotify_palette_accent));
 }
 
 @media (max-width: 980px), (max-height: 560px) {

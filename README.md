@@ -9,7 +9,7 @@
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-GPL--3.0-blue?style=for-the-badge"></a>
   <img alt="Windows" src="https://img.shields.io/badge/windows-primary-00d4ff?style=for-the-badge">
   <img alt="Linux" src="https://img.shields.io/badge/linux-supported-39ff88?style=for-the-badge">
-  <img alt="Version" src="https://img.shields.io/badge/revival-1.0.4-9cf?style=for-the-badge">
+  <img alt="Version" src="https://img.shields.io/badge/revival-1.0.5-9cf?style=for-the-badge">
 </p>
 
 eDEX Revival is a revived sci-fi terminal, system monitor, file cockpit, lightweight editor, SSH launcher, and local developer cockpit.
@@ -29,10 +29,13 @@ It is a fork and continuation of the original [eDEX-UI](https://github.com/GitSq
 - File Operations Cockpit with explorer, preview, Git-aware actions, batch operations, terminal-here flow, and resizable internal windows.
 - Lightweight editor workbench with tabs, file sidebar, search, split view, save states, and safer file-open behavior.
 - Native SSH profile client that opens sessions in terminal tabs without storing passwords, with guided SSH key setup and keepalive controls.
-- Spotify Connect widget with user-owned Web API setup, PKCE OAuth, encrypted token storage when available, album art, playback controls, adaptive layout, fullscreen focus mode, and optional routing to the secondary monitor.
+- Spotify Connect widget with user-owned Web API setup, PKCE OAuth, encrypted token storage when available, album art, playback controls, adaptive layout, optional album-art palette theming, fullscreen focus mode, and secondary-monitor routing.
 - Native packaged update flow with background download, progress UI, restart/install action, and Settings controls.
 - Terminal diagnostics and optional Error to Fix handoff for Codex or Claude CLI.
 - Privacy controls for IP, interface name, geolocation, and globe/network modes.
+- Session-only screen-share mode for masking sensitive paths, SSH/network labels, interface data, and geolocation during demos.
+- Loopback-only terminal transport with per-session tokens for terminal WebSocket attachment.
+- Settings save/import/export through main-process IPC with validation, backups, and atomic writes.
 - Plugin docs, examples, and plugin error recovery.
 - Terminal copy/paste shortcuts and tab close controls.
 
@@ -80,6 +83,7 @@ eDEX-Revival-Linux-x86_64.AppImage
 ```
 
 Release binaries may be unsigned. Windows can show a SmartScreen warning until the app builds trust.
+Unsigned builds use conservative update auto-download defaults; users can still check and download updates from Settings.
 
 ## Development
 
@@ -123,6 +127,8 @@ Error to Fix is disabled by default. When enabled, eDEX Revival can prepare an e
 
 Privacy controls can hide IP address, network interface name, geolocation, and live globe/network lookup behavior. The Privacy preset applies those defaults in one step.
 
+Screen-share mode is a session toggle in Settings Center. It does not persist by default, and while active it masks privacy-sensitive UI and blocks public IP/geolocation lookup.
+
 ## SSH
 
 The SSH Client stores profile metadata only:
@@ -143,6 +149,8 @@ The SSH Client can guide users through generating an Ed25519 key, copying the pu
 
 Spotify integration is user-owned. Each user creates a Spotify Developer app, selects `Web API`, adds the local Redirect URI shown in Settings, and pastes only the app Client ID. eDEX Revival uses Authorization Code with PKCE and does not need or store a Client Secret.
 
+The Spotify widget can optionally recolor itself from the current album art palette. `spotify.dynamicPalette` supports `fullscreen`, `always`, and `off`; the palette is extracted locally from the already-rendered album art and is not persisted.
+
 Requested Spotify scopes are limited to playback state, currently playing, and playback control:
 
 - `user-read-playback-state`
@@ -151,7 +159,6 @@ Requested Spotify scopes are limited to playback state, currently playing, and p
 
 ## Documentation
 
-- [Revival roadmap](docs/edex-revival-roadmap.md)
 - [Release notes](docs/revival-release-notes.md)
 - [Contribution guide](docs/CONTRIBUTING-REVIVAL.md)
 - [Plugin manifest docs](docs/plugins/manifest.md)

@@ -27,6 +27,9 @@ class SpotifyPlayer {
         this.fullscreen = false;
         this.running = false;
         this.state = null;
+        this.paletteCache = new Map();
+        this.paletteRequestId = 0;
+        this.activePaletteKey = "";
         this.pollIntervalMs = window.settings && window.settings.spotify && window.settings.spotify.pollIntervalMs || 5000;
         this.refreshNodes();
         this.bind();
@@ -44,6 +47,275 @@ class SpotifyPlayer {
         const minutes = Math.floor(total / 60);
         const seconds = String(total % 60).padStart(2, "0");
         return `${minutes}:${seconds}`;
+    }
+
+    spotifySettings() {
+        return window.normalizeSpotifySettings ? window.normalizeSpotifySettings(window.settings.spotify || {}) : (window.settings.spotify || {});
+    }
+
+    dynamicPaletteMode() {
+        const mode = this.spotifySettings().dynamicPalette || "fullscreen";
+        return ["off", "fullscreen", "always"].includes(mode) ? mode : "fullscreen";
+    }
+
+    dynamicPaletteAllowed() {
+        const mode = this.dynamicPaletteMode();
+        if (mode === "off") return false;
+        if (mode === "fullscreen" && this.fullscreen !== true) return false;
+        return this.spotifySettings().showAlbumArt !== false;
+    }
+
+    clamp(value, min, max) {
+        return Math.max(min, Math.min(max, Number(value) || 0));
+    }
+
+    colorDistance(a, b) {
+        const dr = (a[0] || 0) - (b[0] || 0);
+        const dg = (a[1] || 0) - (b[1] || 0);
+        const db = (a[2] || 0) - (b[2] || 0);
+        return Math.sqrt(dr * dr + dg * dg + db * db);
+    }
+
+    mixRgb(a, b, bWeight) {
+        const weight = this.clamp(bWeight, 0, 1);
+        return [0, 1, 2].map(index => Math.round((a[index] || 0) * (1 - weight) + (b[index] || 0) * weight));
+    }
+
+    rgbToHsl(rgb) {
+        const r = (rgb[0] || 0) / 255;
+        const g = (rgb[1] || 0) / 255;
+        const b = (rgb[2] || 0) / 255;
+        const max = Math.max(r, g, b);
+        const min = Math.min(r, g, b);
+        let h = 0;
+        let s = 0;
+        const l = (max + min) / 2;
+        if (max !== min) {
+            const d = max - min;
+            s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+            switch(max) {
+                case r:
+                    h = (g - b) / d + (g < b ? 6 : 0);
+                    break;
+                case g:
+                    h = (b - r) / d + 2;
+                    break;
+                default:
+                    h = (r - g) / d + 4;
+                    break;
+            }
+            h /= 6;
+        }
+        return {h, s, l};
+    }
+
+    hslToRgb(hsl) {
+        const h = ((Number(hsl.h) || 0) % 1 + 1) % 1;
+        const s = this.clamp(hsl.s, 0, 1);
+        const l = this.clamp(hsl.l, 0, 1);
+        if (s === 0) {
+            const value = Math.round(l * 255);
+            return [value, value, value];
+        }
+        const hue2rgb = (p, q, t) => {
+            if (t < 0) t += 1;
+            if (t > 1) t -= 1;
+            if (t < 1 / 6) return p + (q - p) * 6 * t;
+            if (t < 1 / 2) return q;
+            if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+            return p;
+        };
+        const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+        const p = 2 * l - q;
+        return [
+            Math.round(hue2rgb(p, q, h + 1 / 3) * 255),
+            Math.round(hue2rgb(p, q, h) * 255),
+            Math.round(hue2rgb(p, q, h - 1 / 3) * 255)
+        ];
+    }
+
+    relativeLuminance(rgb) {
+        const channel = value => {
+            const next = (value || 0) / 255;
+            return next <= 0.03928 ? next / 12.92 : Math.pow((next + 0.055) / 1.055, 2.4);
+        };
+        return 0.2126 * channel(rgb[0]) + 0.7152 * channel(rgb[1]) + 0.0722 * channel(rgb[2]);
+    }
+
+    contrastRatio(a, b) {
+        const light = Math.max(this.relativeLuminance(a), this.relativeLuminance(b));
+        const dark = Math.min(this.relativeLuminance(a), this.relativeLuminance(b));
+        return (light + 0.05) / (dark + 0.05);
+    }
+
+    cssRgb(rgb) {
+        return [0, 1, 2].map(index => Math.round(this.clamp(rgb[index], 0, 255))).join(", ");
+    }
+
+    bestPaletteColor(colors, score) {
+        return colors.reduce((best, color) => !best || score(color) > score(best) ? color : best, null);
+    }
+
+    tunedAccent(rgb, background) {
+        const hsl = this.rgbToHsl(rgb);
+        hsl.l = this.clamp(hsl.l, 0.46, 0.72);
+        if (hsl.s >= 0.08) hsl.s = this.clamp(Math.max(0.36, hsl.s * 1.08), 0, 0.92);
+        let tuned = this.hslToRgb(hsl);
+        while (this.contrastRatio(tuned, background) < 3 && hsl.l < 0.86) {
+            hsl.l += 0.05;
+            tuned = this.hslToRgb(hsl);
+        }
+        return tuned;
+    }
+
+    paletteFromPixels(data) {
+        const buckets = new Map();
+        for (let index = 0; index < data.length; index += 4) {
+            const alpha = data[index + 3];
+            if (alpha < 48) continue;
+            const r = data[index];
+            const g = data[index + 1];
+            const b = data[index + 2];
+            const key = `${r >> 4},${g >> 4},${b >> 4}`;
+            const bucket = buckets.get(key) || {count: 0, r: 0, g: 0, b: 0};
+            bucket.count++;
+            bucket.r += r;
+            bucket.g += g;
+            bucket.b += b;
+            buckets.set(key, bucket);
+        }
+        const colors = Array.from(buckets.values()).map(bucket => {
+            const rgb = [
+                Math.round(bucket.r / bucket.count),
+                Math.round(bucket.g / bucket.count),
+                Math.round(bucket.b / bucket.count)
+            ];
+            return {rgb, count: bucket.count, hsl: this.rgbToHsl(rgb)};
+        });
+        if (!colors.length) return null;
+
+        const usable = colors.filter(color => !(color.hsl.l > 0.93 && color.hsl.s < 0.18));
+        const dominantSet = usable.length ? usable : colors;
+        const dominant = this.bestPaletteColor(dominantSet, color => {
+            const lightnessWeight = 1.25 - Math.min(0.95, Math.abs(color.hsl.l - 0.42));
+            const blackPenalty = color.hsl.l < 0.05 ? 0.45 : 1;
+            const whitePenalty = color.hsl.l > 0.88 ? 0.42 : 1;
+            return color.count * (0.55 + color.hsl.s * 1.35) * lightnessWeight * blackPenalty * whitePenalty;
+        }) || colors[0];
+        const accentCandidates = colors.filter(color => color.hsl.l > 0.14 && color.hsl.l < 0.86 && color.hsl.s > 0.10);
+        const accentSource = this.bestPaletteColor(accentCandidates.length ? accentCandidates : dominantSet, color => {
+            const distance = Math.max(24, this.colorDistance(color.rgb, dominant.rgb)) / 255;
+            const lightnessWeight = 1.1 - Math.min(0.75, Math.abs(color.hsl.l - 0.55));
+            return color.count * (0.7 + color.hsl.s * 3.2) * lightnessWeight * distance;
+        }) || dominant;
+
+        const background = this.mixRgb(dominant.rgb, [2, 4, 6], 0.72);
+        const backgroundAlt = this.mixRgb(accentSource.rgb, [3, 6, 8], 0.78);
+        const accent = this.tunedAccent(accentSource.rgb, background);
+        const muted = this.mixRgb(accent, background, 0.52);
+        const text = this.contrastRatio([238, 248, 246], background) >= this.contrastRatio([5, 9, 12], background)
+            ? [238, 248, 246]
+            : [5, 9, 12];
+        const buttonText = this.relativeLuminance(accent) > 0.42 ? [4, 8, 10] : [240, 248, 246];
+        return {background, backgroundAlt, accent, muted, text, buttonText};
+    }
+
+    extractPalette(imageDataUrl) {
+        return new Promise(resolve => {
+            if (!imageDataUrl || typeof imageDataUrl !== "string") return resolve(null);
+            const image = new Image();
+            image.onload = () => {
+                try {
+                    const size = 48;
+                    const canvas = document.createElement("canvas");
+                    canvas.width = size;
+                    canvas.height = size;
+                    const context = canvas.getContext("2d", {willReadFrequently: true});
+                    if (!context) return resolve(null);
+                    context.drawImage(image, 0, 0, size, size);
+                    resolve(this.paletteFromPixels(context.getImageData(0, 0, size, size).data));
+                } catch(error) {
+                    resolve(null);
+                }
+            };
+            image.onerror = () => resolve(null);
+            image.decoding = "async";
+            image.src = imageDataUrl;
+        });
+    }
+
+    clearDynamicPalette() {
+        this.paletteRequestId++;
+        this.activePaletteKey = "";
+        const props = [
+            "--spotify_palette_bg",
+            "--spotify_palette_bg_alt",
+            "--spotify_palette_accent",
+            "--spotify_palette_muted",
+            "--spotify_palette_text",
+            "--spotify_palette_button_text"
+        ];
+        [this.root, document.body].forEach(element => {
+            if (!element || !element.style) return;
+            props.forEach(prop => element.style.removeProperty(prop));
+            if (element.classList) element.classList.remove("spotify_palette_dynamic");
+        });
+        if (this.root && this.root.dataset) delete this.root.dataset.spotifyPalette;
+    }
+
+    applyDynamicPalette(palette, key) {
+        this.refreshNodes();
+        if (!this.root || !palette) return false;
+        const values = {
+            "--spotify_palette_bg": this.cssRgb(palette.background),
+            "--spotify_palette_bg_alt": this.cssRgb(palette.backgroundAlt),
+            "--spotify_palette_accent": this.cssRgb(palette.accent),
+            "--spotify_palette_muted": this.cssRgb(palette.muted),
+            "--spotify_palette_text": this.cssRgb(palette.text),
+            "--spotify_palette_button_text": this.cssRgb(palette.buttonText)
+        };
+        [this.root, document.body].forEach(element => {
+            if (!element || !element.style) return;
+            Object.keys(values).forEach(prop => element.style.setProperty(prop, values[prop]));
+            if (element.classList) element.classList.add("spotify_palette_dynamic");
+        });
+        this.root.dataset.spotifyPalette = "dynamic";
+        this.activePaletteKey = key || "";
+        return true;
+    }
+
+    updateDynamicPalette(item) {
+        this.refreshNodes();
+        if (!this.dynamicPaletteAllowed() || !item || !item.imageDataUrl) {
+            this.clearDynamicPalette();
+            return Promise.resolve(false);
+        }
+        const key = `${item.imageUrl || item.id || item.uri || "spotify"}:${item.imageDataUrl.length}`;
+        if (this.activePaletteKey === key && this.root && this.root.classList.contains("spotify_palette_dynamic")) {
+            return Promise.resolve(true);
+        }
+        const cached = this.paletteCache.get(key);
+        if (cached) {
+            this.applyDynamicPalette(cached, key);
+            return Promise.resolve(true);
+        }
+        const requestId = ++this.paletteRequestId;
+        return this.extractPalette(item.imageDataUrl).then(palette => {
+            if (requestId !== this.paletteRequestId) return false;
+            if (!palette) {
+                this.clearDynamicPalette();
+                return false;
+            }
+            this.paletteCache.set(key, palette);
+            if (this.paletteCache.size > 12) {
+                const first = this.paletteCache.keys().next().value;
+                this.paletteCache.delete(first);
+            }
+            return this.applyDynamicPalette(palette, key);
+        }).catch(() => {
+            if (requestId === this.paletteRequestId) this.clearDynamicPalette();
+            return false;
+        });
     }
 
     icon(name) {
@@ -278,6 +550,7 @@ class SpotifyPlayer {
     setFullscreen(active) {
         this.fullscreen = active === true;
         this.refreshNodes();
+        this.render();
         if (this.fullscreen) this.start();
         this.log("fullscreen", this.fullscreen ? "open" : "close");
         return true;
@@ -364,6 +637,7 @@ class SpotifyPlayer {
     }
 
     renderSetup(status) {
+        this.clearDynamicPalette();
         const current = window.normalizeSpotifySettings ? window.normalizeSpotifySettings(window.settings.spotify || {}) : {};
         const callbackPort = status.callbackPort || current.callbackPort || 43879;
         const redirectUri = status.redirectUri || `http://127.0.0.1:${callbackPort}/spotify/callback`;
@@ -392,6 +666,7 @@ class SpotifyPlayer {
     }
 
     renderConnecting(status) {
+        this.clearDynamicPalette();
         this.setStatus("PAIRING", "auth");
         this.body.innerHTML = `<div class="spotify_empty">
             <strong>WAITING FOR SPOTIFY AUTH</strong>
@@ -407,6 +682,7 @@ class SpotifyPlayer {
     }
 
     renderDisconnected(status) {
+        this.clearDynamicPalette();
         this.setStatus("READY", "ready");
         this.body.innerHTML = `<div class="spotify_empty">
             <strong>SPOTIFY CONNECT READY</strong>
@@ -459,6 +735,7 @@ class SpotifyPlayer {
             ${data.error ? `<h6 class="spotify_hint error">${this.escape(data.error)}</h6>` : ""}
         </div>`;
         this.bindButtons();
+        this.updateDynamicPalette(item);
     }
 
     async handleAction(action, button) {

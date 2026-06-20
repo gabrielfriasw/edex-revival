@@ -34,6 +34,7 @@ const ipc = ipcMain;
 const path = require("path");
 const url = require("url");
 const fs = require("fs");
+const packageConfig = require("../package.json");
 const Terminal = require("./classes/terminal.class.js").Terminal;
 const {
     defaultDevSettings,
@@ -48,6 +49,7 @@ ipc.on("log", (e, type, content) => {
 });
 
 var win, secondaryWin, tty, extraTtys;
+let screenShareMode = false;
 const startupRecoveryWarnings = [];
 const settingsFile = path.join(electron.app.getPath("userData"), "settings.json");
 const shortcutsFile = path.join(electron.app.getPath("userData"), "shortcuts.json");
@@ -58,6 +60,7 @@ const kblayoutsDir = path.join(electron.app.getPath("userData"), "keyboards");
 const innerKblayoutsDir = path.join(__dirname, "assets/kb_layouts");
 const fontsDir = path.join(electron.app.getPath("userData"), "fonts");
 const innerFontsDir = path.join(__dirname, "assets/fonts");
+const forceCodeSigning = !!(packageConfig.build && packageConfig.build.forceCodeSigning);
 
 const defaultSettings = {
     shell: (process.platform === "win32") ? "powershell.exe" : "bash",
@@ -90,8 +93,8 @@ const defaultSettings = {
         maxSystemInfoWorkers: 2,
         systemInfoWorkerIdleMs: 30000,
         systemInfoWorkerScaleDelayMs: 750,
-        pauseHiddenWidgets: false,
-        pauseWhenWindowBlurred: false,
+        pauseHiddenWidgets: true,
+        pauseWhenWindowBlurred: true,
         enableGlobeByDefault: true,
         enableTerminalWebGL: true,
         enableTerminalLigatures: true,
@@ -104,7 +107,7 @@ const defaultSettings = {
     updates: {
         enabled: true,
         checkOnStartup: true,
-        autoDownload: true,
+        autoDownload: forceCodeSigning,
         installOnQuit: true
     },
     terminalStyle: {
@@ -169,6 +172,12 @@ function mergeSettingsDefaults(target, defaults) {
 
 function readJsonFile(file) {
     return JSON.parse(fs.readFileSync(file, "utf-8").replace(/^\uFEFF/, ""));
+}
+
+function writeJsonFileAtomic(file, data) {
+    const tmp = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.${Date.now()}.tmp`);
+    fs.writeFileSync(tmp, JSON.stringify(data, "", 4), "utf-8");
+    fs.renameSync(tmp, file);
 }
 
 function readSettingsFile() {
@@ -255,10 +264,16 @@ function configureAutoUpdater(settings) {
     try {
         autoUpdater = require("electron-updater").autoUpdater;
         autoUpdater.logger = updaterLogger();
-        autoUpdater.autoDownload = updateSettings.autoDownload !== false;
+        autoUpdater.autoDownload = forceCodeSigning && updateSettings.autoDownload === true;
         autoUpdater.autoInstallOnAppQuit = updateSettings.installOnQuit !== false;
         autoUpdater.autoRunAppAfterInstall = true;
-        publishUpdateState({status: "idle", supported: true, error: ""});
+        publishUpdateState({
+            status: "idle",
+            supported: true,
+            signingRequired: forceCodeSigning,
+            autoDownload: autoUpdater.autoDownload,
+            error: forceCodeSigning ? "" : "Automatic update downloads are disabled until signed Windows releases are enforced."
+        });
 
         autoUpdater.on("checking-for-update", () => {
             publishUpdateState({status: "checking", checking: true, error: ""});
@@ -449,12 +464,27 @@ function getDualMonitorState(settings = readSettingsFile()) {
     };
 }
 
+function terminalConnectionInfo(term) {
+    if (!term) return null;
+    return {
+        host: term.host || "127.0.0.1",
+        port: Number(term.port),
+        token: term.token || ""
+    };
+}
+
 function getRendererContext(sender) {
     return {
         appVersion: app.getVersion(),
         argv: process.argv.slice(),
         recoveryWarnings: startupRecoveryWarnings.slice(),
         windowRole: secondaryWin && !secondaryWin.isDestroyed() && sender === secondaryWin.webContents ? "secondary" : "primary",
+        privacy: {
+            screenShareMode
+        },
+        terminal: {
+            primary: terminalConnectionInfo(tty)
+        },
         paths: {
             app: app.getAppPath(),
             userData: app.getPath("userData"),
@@ -486,6 +516,22 @@ ipc.handle("edex:open-external", (event, rawURL) => {
 ipc.handle("edex:open-path", (event, filePath) => {
     if (!isTrustedSender(event) || typeof filePath !== "string" || filePath.length === 0) return false;
     return shell.openPath(filePath);
+});
+
+function publishScreenShareMode() {
+    const state = {enabled: screenShareMode};
+    [win, secondaryWin].forEach(browserWindow => {
+        if (browserWindow && !browserWindow.isDestroyed() && !browserWindow.webContents.isDestroyed()) {
+            browserWindow.webContents.send("edex:privacy-screen-share", state);
+        }
+    });
+    return state;
+}
+
+ipc.handle("edex:privacy-screen-share", (event, enabled) => {
+    if (!isTrustedSender(event)) return {enabled: screenShareMode};
+    screenShareMode = enabled === true;
+    return publishScreenShareMode();
 });
 
 ipc.on("edex:app-control", (event, action) => {
@@ -632,14 +678,14 @@ try {
 }
 // Create default settings file
 if (!fs.existsSync(settingsFile)) {
-    fs.writeFileSync(settingsFile, JSON.stringify(defaultSettings, "", 4));
+    writeJsonFileAtomic(settingsFile, defaultSettings);
     signale.info(`Default settings written to ${settingsFile}`);
 } else {
     const currentSettings = readSettingsFile();
     const beforeMerge = JSON.stringify(currentSettings);
     const mergedSettings = mergeSettingsDefaults(currentSettings, defaultSettings);
     if (beforeMerge !== JSON.stringify(mergedSettings)) {
-        fs.writeFileSync(settingsFile, JSON.stringify(mergedSettings, "", 4));
+        writeJsonFileAtomic(settingsFile, mergedSettings);
         signale.info(`Settings defaults merged into ${settingsFile}`);
     }
 }
@@ -960,6 +1006,8 @@ app.on('ready', async () => {
     tty = new Terminal({
         role: "server",
         ipc,
+        isTrustedSender,
+        host: "127.0.0.1",
         shell: settings.shell,
         params: settings.shellArgs || '',
         cwd: settings.cwd,
@@ -1004,8 +1052,7 @@ app.on('ready', async () => {
         extraTtys[basePort+i] = null;
     }
 
-    ipc.on("ttyspawn", (e, arg) => {
-        if (!isTrustedSender(e)) return;
+    const spawnExtraTerminal = arg => {
         const spawnOptions = arg && typeof arg === "object" ? arg : {};
         const initialCommand = typeof spawnOptions.initialCommand === "string" && spawnOptions.initialCommand.length < 4096
             ? spawnOptions.initialCommand
@@ -1020,50 +1067,61 @@ app.on('ready', async () => {
 
         if (port === null) {
             signale.error("TTY spawn denied (Reason: exceeded max TTYs number)");
-            e.sender.send("ttyspawn-reply", "ERROR: max number of ttys reached");
-        } else {
-            signale.pending(`Creating new TTY process on port ${port}`);
-            let term = new Terminal({
-                role: "server",
-                ipc,
-                shell: settings.shell,
-                params: settings.shellArgs || '',
-                cwd: tty.tty._cwd || settings.cwd,
-                env: cleanEnv,
-                port: port
-            });
-            signale.success(`New terminal back-end initialized at ${port}`);
-            term.onclosed = (code, signal) => {
-                term.ondisconnected = () => {};
-                term.wss.close();
-                signale.complete(`TTY exited at ${port}`, code, signal);
-                extraTtys[term.port] = null;
-                term = null;
-            };
-            term.onopened = pid => {
-                signale.success(`TTY ${port} connected to frontend (process PID ${pid})`);
-                if (initialCommand) {
-                    setTimeout(() => {
-                        try {
-                            term.tty.write(initialCommand+"\r");
-                        } catch(error) {
-                            signale.error(`Unable to write initial command to TTY ${port}: ${error.message}`);
-                        }
-                    }, 150);
-                }
-            };
-            term.onresized = () => {};
-            term.ondisconnected = () => {
-                term.onclosed = () => {};
-                term.close();
-                term.wss.close();
-                extraTtys[term.port] = null;
-                term = null;
-            };
-
-            extraTtys[port] = term;
-            e.sender.send("ttyspawn-reply", "SUCCESS: "+port);
+            return {ok: false, error: "max number of ttys reached"};
         }
+
+        signale.pending(`Creating new TTY process on port ${port}`);
+        let term = new Terminal({
+            role: "server",
+            ipc,
+            isTrustedSender,
+            host: "127.0.0.1",
+            shell: settings.shell,
+            params: settings.shellArgs || '',
+            cwd: tty.tty._cwd || settings.cwd,
+            env: cleanEnv,
+            port: port
+        });
+        signale.success(`New terminal back-end initialized at ${port}`);
+        term.onclosed = (code, signal) => {
+            term.ondisconnected = () => {};
+            signale.complete(`TTY exited at ${port}`, code, signal);
+            extraTtys[term.port] = null;
+            term = null;
+        };
+        term.onopened = pid => {
+            signale.success(`TTY ${port} connected to frontend (process PID ${pid})`);
+            if (initialCommand) {
+                setTimeout(() => {
+                    try {
+                        term.tty.write(initialCommand+"\r");
+                    } catch(error) {
+                        signale.error(`Unable to write initial command to TTY ${port}: ${error.message}`);
+                    }
+                }, 150);
+            }
+        };
+        term.onresized = () => {};
+        term.ondisconnected = () => {
+            term.onclosed = () => {};
+            const closedPort = term.port;
+            term.close();
+            extraTtys[closedPort] = null;
+            term = null;
+        };
+
+        extraTtys[port] = term;
+        return Object.assign({ok: true}, terminalConnectionInfo(term));
+    };
+
+    ipc.handle("edex:terminal-create-session", (event, arg) => {
+        if (!isTrustedSender(event)) return {ok: false, error: "untrusted sender"};
+        return spawnExtraTerminal(arg);
+    });
+
+    ipc.on("ttyspawn", (e, arg) => {
+        if (!isTrustedSender(e)) return;
+        e.sender.send("ttyspawn-reply", spawnExtraTerminal(arg));
     });
 
     // Backend support for theme and keyboard hotswitch

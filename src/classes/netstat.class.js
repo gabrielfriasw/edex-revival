@@ -32,6 +32,10 @@ class Netstat {
         this.geoLookup = {
             get: () => null
         };
+        this.shouldHideInterface = () => {
+            return (window.isScreenShareMode && window.isScreenShareMode())
+                || (window.settings.widgets && window.settings.widgets.showInterface === false);
+        };
         this.ensureGeoLookup = () => {
             if (this.geoReady || (window.shouldResolvePublicNetworkInfo && !window.shouldResolvePublicNetworkInfo())) return Promise.resolve(false);
             if (window.normalizeWidgetSettings && window.normalizeWidgetSettings().showGeo === false) return Promise.resolve(false);
@@ -89,7 +93,7 @@ class Netstat {
             let netID = 0;
             if (!net) {
                 this.iface = null;
-                document.getElementById("mod_netstat_iname").innerText = window.settings.widgets && window.settings.widgets.showInterface === false ? "Interface: hidden" : "Interface: (offline)";
+                document.getElementById("mod_netstat_iname").innerText = this.shouldHideInterface() ? "Interface: hidden" : "Interface: (offline)";
                 this.offline = true;
                 document.querySelector("#mod_netstat_innercontainer > div:first-child > h2").innerHTML = "OFFLINE";
                 document.querySelector("#mod_netstat_innercontainer > div:nth-child(2) > h2").innerHTML = "--ms";
@@ -120,7 +124,7 @@ class Netstat {
                     } else {
                         // No external connection!
                         this.iface = null;
-                        document.getElementById("mod_netstat_iname").innerText = window.settings.widgets && window.settings.widgets.showInterface === false ? "Interface: hidden" : "Interface: (offline)";
+                        document.getElementById("mod_netstat_iname").innerText = this.shouldHideInterface() ? "Interface: hidden" : "Interface: (offline)";
 
                         this.offline = true;
                         document.querySelector("#mod_netstat_innercontainer > div:first-child > h2").innerHTML = "OFFLINE";
@@ -136,7 +140,7 @@ class Netstat {
             this.iface = net.iface;
             this.internalIPv4 = net.ip4;
             const ifaceDetail = net.iface;
-            document.getElementById("mod_netstat_iname").innerText = window.settings.widgets && window.settings.widgets.showInterface === false ? "Interface: hidden" : "Interface: "+ifaceDetail;
+            document.getElementById("mod_netstat_iname").innerText = this.shouldHideInterface() ? "Interface: hidden" : "Interface: "+ifaceDetail;
 
             if (net.ip4 === "127.0.0.1") {
                 offline = true;

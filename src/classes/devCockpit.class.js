@@ -284,7 +284,12 @@ class DevCockpit {
             new Modal({type: "warning", title: "Error to Fix", message: "No AI command could be prepared."});
             return false;
         }
-        this.spawnShellTab({initialCommand: result.command, label: label || result.provider});
+        const spawned = this.spawnShellTab({initialCommand: result.command, label: label || result.provider});
+        if (result.deletePromptOnSend && result.promptFile && edex.ai && typeof edex.ai.consumePrompt === "function") {
+            Promise.resolve(spawned).then(() => {
+                setTimeout(() => edex.ai.consumePrompt(result.promptFile).catch(() => {}), 30000);
+            }).catch(() => {});
+        }
         return true;
     }
 
@@ -417,17 +422,22 @@ class DevCockpit {
         tab.innerHTML = window.shellTabLabel ? window.shellTabLabel(number, "LOADING...") : `<p>LOADING...</p>`;
         ipc.send("ttyspawn", {initialCommand: options.initialCommand || ""});
         ipc.once("ttyspawn-reply", (e, response) => {
-            if (response.startsWith("ERROR")) {
+            const session = window.terminalSessionFromReply
+                ? window.terminalSessionFromReply(response)
+                : {ok: String(response || "").startsWith("SUCCESS"), port: Number(String(response || "").substr(9)), host: "127.0.0.1", token: ""};
+            if (!session.ok) {
                 tab.innerHTML = window.shellTabLabel ? window.shellTabLabel(number, "ERROR") : "<p>ERROR</p>";
-                new Modal({type: "warning", title: "Terminal", message: this.escape(response)});
+                new Modal({type: "warning", title: "Terminal", message: this.escape(session.error || "Unable to allocate terminal")});
                 return;
             }
 
-            const port = Number(response.substr(9));
+            const port = session.port;
             window.term[number] = new Terminal({
                 role: "client",
                 parentId: `terminal${number}`,
-                port
+                port,
+                host: session.host,
+                token: session.token
             });
             window.term[number].onclose = () => {
                 delete window.term[number].onprocesschange;
@@ -2053,7 +2063,7 @@ class DevEditor {
         const dirty = this.workbench.docs.some(id => this.docs[id] && this.docs[id].dirty);
         const active = this.activeDoc() || this.activeDoc("primary") || this.activeDoc("secondary");
         const subtitle = active ? (active.path || active.name) : this.workspaceRoot();
-        this.windowManager.setTitle(this.workbenchId, `${dirty ? "*" : ""}eDEX IDE`, subtitle);
+        this.windowManager.setTitle(this.workbenchId, `${dirty ? "*" : ""}eDEX Workbench`, subtitle);
     }
 
     ensureWorkbenchWindow() {
@@ -2067,7 +2077,7 @@ class DevEditor {
 
         return this.windowManager.open({
             id: this.workbenchId,
-            title: "eDEX IDE",
+            title: "eDEX Workbench",
             subtitle: this.workspaceRoot(),
             className: "dev_editor_window dev_ide_window",
             rect: {left: 7, top: 5, width: 86, height: 84},
@@ -3352,6 +3362,8 @@ class DevPluginHost {
         this.plugins = [];
         this.commands = {};
         this.panels = {};
+        this.activeModules = {};
+        this.cleanups = {};
     }
 
     escape(value) {
@@ -3363,25 +3375,109 @@ class DevPluginHost {
         return this.plugins;
     }
 
+    hasPermission(plugin, permission) {
+        return plugin && Array.isArray(plugin.permissions) && plugin.permissions.includes(permission);
+    }
+
+    contributionSummary(plugin) {
+        const contributes = plugin && plugin.contributes || {};
+        return Object.keys(contributes).filter(key => {
+            return Array.isArray(contributes[key]) ? contributes[key].length : !!contributes[key];
+        }).join(", ") || "none";
+    }
+
+    addCleanup(plugin, cleanup) {
+        if (!plugin || !plugin.id || typeof cleanup !== "function") return null;
+        let called = false;
+        const wrapped = async () => {
+            if (called) return;
+            called = true;
+            await cleanup();
+        };
+        const previous = this.cleanups[plugin.id];
+        this.cleanups[plugin.id] = async () => {
+            if (typeof previous === "function") await previous();
+            await wrapped();
+        };
+        return wrapped;
+    }
+
     api(plugin) {
         return {
             registerCommand: (id, label, handler) => {
+                if (!this.hasPermission(plugin, "commands")) throw new Error("Plugin permission required: commands");
                 this.commands[`${plugin.id}:${id}`] = {plugin: plugin.id, label, handler};
             },
             registerPanel: (id, label, render) => {
+                if (!this.hasPermission(plugin, "panels")) throw new Error("Plugin permission required: panels");
                 this.panels[`${plugin.id}:${id}`] = {plugin: plugin.id, label, render};
             },
-            openWindow: options => this.windowManager.open(options),
-            notify: message => new Modal({type: "info", title: plugin.name, message: this.escape(message)})
+            openWindow: options => {
+                if (!this.hasPermission(plugin, "window")) throw new Error("Plugin permission required: window");
+                const originalRender = options && options.render;
+                const originalClose = options && options.onClose;
+                let renderCleanup = null;
+                return this.windowManager.open(Object.assign({}, options || {}, {
+                    render: (body, record) => {
+                        const cleanup = typeof originalRender === "function" ? originalRender(body, record) : null;
+                        renderCleanup = this.addCleanup(plugin, cleanup);
+                    },
+                    onClose: record => {
+                        if (typeof renderCleanup === "function") renderCleanup().catch(() => {});
+                        if (typeof originalClose === "function") return originalClose(record);
+                    }
+                }));
+            },
+            setInterval: (handler, ms) => {
+                const timer = setInterval(handler, ms);
+                return this.addCleanup(plugin, () => clearInterval(timer));
+            },
+            notify: message => {
+                if (!this.hasPermission(plugin, "status") && !this.hasPermission(plugin, "window")) throw new Error("Plugin permission required: status");
+                return new Modal({type: "info", title: plugin.name, message: this.escape(message)});
+            }
         };
+    }
+
+    clearContributions(pluginId) {
+        Object.keys(this.commands).forEach(id => {
+            if (this.commands[id] && this.commands[id].plugin === pluginId) delete this.commands[id];
+        });
+        Object.keys(this.panels).forEach(id => {
+            if (this.panels[id] && this.panels[id].plugin === pluginId) delete this.panels[id];
+        });
+    }
+
+    async deactivate(plugin, persist = true) {
+        if (!plugin || !plugin.id) return false;
+        const cleanup = this.cleanups[plugin.id];
+        delete this.cleanups[plugin.id];
+        try {
+            if (typeof cleanup === "function") await cleanup();
+        } catch(error) {
+            plugin.error = error.message || String(error);
+        }
+        const mod = this.activeModules[plugin.id];
+        delete this.activeModules[plugin.id];
+        try {
+            if (mod && typeof mod.deactivate === "function") await mod.deactivate(this.api(plugin));
+        } catch(error) {
+            plugin.error = error.message || String(error);
+        }
+        this.clearContributions(plugin.id);
+        if (persist) await edex.plugins.setState(plugin.id, false, plugin.error || "");
+        return true;
     }
 
     async activate(plugin) {
         if (!plugin.enabled) return false;
         try {
+            await this.deactivate(plugin, false);
             const mod = require(plugin.entry);
+            this.activeModules[plugin.id] = mod;
             if (mod && typeof mod.activate === "function") {
-                await mod.activate(this.api(plugin));
+                const cleanup = await mod.activate(this.api(plugin));
+                if (typeof cleanup === "function") this.cleanups[plugin.id] = cleanup;
             }
             plugin.error = "";
             await edex.plugins.setState(plugin.id, true, "");
@@ -3419,19 +3515,35 @@ class DevPluginHost {
                 <td>${this.escape(plugin.enabled ? "ON" : "OFF")}</td>
                 <td>${this.escape(plugin.name)}</td>
                 <td>${this.escape(plugin.version)}</td>
+                <td>${this.escape(plugin.trustState || "local")}</td>
+                <td title="${this.escape((plugin.permissions || []).join(", "))}">${this.escape((plugin.permissions || []).join(", ") || "none")}</td>
+                <td title="${this.escape(this.contributionSummary(plugin))}">${this.escape(plugin.health || (plugin.error ? "error" : "ready"))}</td>
                 <td title="${this.escape(plugin.error || plugin.root)}">${this.escape(plugin.error || plugin.root)}</td>
                 <td>
                     <button type="button" data-plugin="${this.escape(plugin.id)}" ${plugin.enabled ? "" : "disabled"}>Activate</button>
                     <button type="button" data-plugin-toggle="${this.escape(plugin.id)}">${plugin.enabled ? "Disable" : "Enable"}</button>
                 </td>
-            </tr>`).join("") : `<tr><td colspan="5">No plugins found.</td></tr>`;
+            </tr>`).join("") : `<tr><td colspan="8">No plugins found.</td></tr>`;
         body.innerHTML = `
             <div class="dev_plugins">
+                <div class="dev_plugins_toolbar">
+                    <button type="button" data-plugin-recovery="third-party">Disable Third-Party</button>
+                </div>
                 <table>
-                    <tr><th>State</th><th>Name</th><th>Version</th><th>Root</th><th>Action</th></tr>
+                    <tr><th>State</th><th>Name</th><th>Version</th><th>Trust</th><th>Permissions</th><th>Health</th><th>Root</th><th>Action</th></tr>
                     ${rows}
                 </table>
             </div>`;
+        const recovery = body.querySelector("[data-plugin-recovery]");
+        if (recovery) {
+            recovery.addEventListener("click", async () => {
+                await Promise.all(this.plugins.filter(plugin => plugin.trustState !== "bundled").map(plugin => this.deactivate(plugin, false)));
+                const result = await edex.plugins.disableThirdParty();
+                await this.refresh();
+                this.renderManager(body);
+                new Modal({type: "info", title: "Plugin Recovery", message: `${(result && result.disabled || []).length} third-party plugin(s) disabled.`});
+            });
+        }
         body.querySelectorAll("button[data-plugin]").forEach(button => {
             button.addEventListener("click", () => {
                 const plugin = this.plugins.find(item => item.id === button.dataset.plugin);
@@ -3444,7 +3556,11 @@ class DevPluginHost {
                 if (!plugin) return;
                 plugin.enabled = !plugin.enabled;
                 if (plugin.enabled) plugin.error = "";
-                await edex.plugins.setState(plugin.id, plugin.enabled, plugin.error || "");
+                if (!plugin.enabled) {
+                    await this.deactivate(plugin, true);
+                } else {
+                    await edex.plugins.setState(plugin.id, true, plugin.error || "");
+                }
                 await this.refresh();
                 this.renderManager(body);
             });

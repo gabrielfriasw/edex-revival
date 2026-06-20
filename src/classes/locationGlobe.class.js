@@ -300,7 +300,9 @@ class LocationGlobe {
         newgeo.longitude = Math.round(newgeo.longitude*10000)/10000;
 
         if (newgeo.latitude !== this.lastgeo.latitude || newgeo.longitude !== this.lastgeo.longitude) {
-            document.querySelector("i.mod_globe_headerInfo").innerText = window.settings.widgets && window.settings.widgets.showGeo === false ? "HIDDEN" : `${newgeo.latitude}, ${newgeo.longitude}`;
+            const hideGeo = (window.isScreenShareMode && window.isScreenShareMode())
+                || (window.settings.widgets && window.settings.widgets.showGeo === false);
+            document.querySelector("i.mod_globe_headerInfo").innerText = hideGeo ? "HIDDEN" : `${newgeo.latitude}, ${newgeo.longitude}`;
             this.removePins();
             this.removeMarkers();
             this.conns = [];

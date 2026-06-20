@@ -2416,6 +2416,13 @@ body.dev_window_dragging * {
     font-size: 1.05vh;
 }
 
+.dev_plugins_toolbar {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.45vw;
+    margin-bottom: 0.6vh;
+}
+
 .dev_diag_toolbar {
     justify-content: start;
 }
@@ -2685,6 +2692,17 @@ div#devfs_context_menu button:disabled {
 
 .dev_plugins tr.plugin-error td:first-child {
     color: var(--color_red);
+}
+
+body.privacy-screen-share .devfs_path_column button,
+body.privacy-screen-share .dev_diag_path strong,
+body.privacy-screen-share .dev_diag_paths strong,
+body.privacy-screen-share .dev_error_fix_meta span,
+body.privacy-screen-share .dev_ssh_profile_list button span,
+body.privacy-screen-share .dev_ssh_preview,
+body.privacy-screen-share .dev_ssh_key_status {
+    color: transparent !important;
+    text-shadow: 0 0 0.65vh rgba(var(--color_r), var(--color_g), var(--color_b), 0.42);
 }
 
 @media (max-width: 1100px), (max-height: 620px) {

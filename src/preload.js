@@ -195,11 +195,17 @@ const ipcApi = {
     },
     on: (channel, listener) => {
         if (!isAllowedIpc(channel)) throw new Error(`Blocked IPC listener: ${channel}`);
-        ipcRenderer.on(channel, (event, ...args) => listener(event, ...args));
+        const wrapped = (event, ...args) => listener(event, ...args);
+        ipcRenderer.on(channel, wrapped);
+        return () => ipcRenderer.removeListener(channel, wrapped);
     },
     once: (channel, listener) => {
         if (!isAllowedIpc(channel)) throw new Error(`Blocked IPC listener: ${channel}`);
         ipcRenderer.once(channel, (event, ...args) => listener(event, ...args));
+    },
+    removeListener: (channel, listener) => {
+        if (!isAllowedIpc(channel)) throw new Error(`Blocked IPC listener: ${channel}`);
+        ipcRenderer.removeListener(channel, listener);
     }
 };
 
@@ -382,7 +388,8 @@ contextBridge.exposeInMainWorld("require", safeRequire);
 contextBridge.exposeInMainWorld("edex", {
     ai: {
         detectTools: () => ipcRenderer.invoke("edex:ai-detect-tools"),
-        runPromptInTab: (provider, prompt) => ipcRenderer.invoke("edex:ai-run-prompt", provider, prompt)
+        runPromptInTab: (provider, prompt) => ipcRenderer.invoke("edex:ai-run-prompt", provider, prompt),
+        consumePrompt: promptFile => ipcRenderer.invoke("edex:ai-consume-prompt", promptFile)
     },
     app: {
         argv: context.argv,
@@ -458,7 +465,8 @@ contextBridge.exposeInMainWorld("edex", {
     },
     plugins: {
         list: () => ipcRenderer.invoke("edex:plugins-list"),
-        setState: (pluginId, enabled, errorMessage) => ipcRenderer.invoke("edex:plugins-set-state", pluginId, !!enabled, errorMessage || "")
+        setState: (pluginId, enabled, errorMessage) => ipcRenderer.invoke("edex:plugins-set-state", pluginId, !!enabled, errorMessage || ""),
+        disableThirdParty: () => ipcRenderer.invoke("edex:plugins-disable-third-party")
     },
     shell: {
         test: options => ipcRenderer.invoke("edex:shell-test", options || {})
@@ -472,6 +480,26 @@ contextBridge.exposeInMainWorld("edex", {
     },
     networkLens: {
         resolveEndpoint: endpoint => ipcRenderer.invoke("edex:network-resolve-endpoint", endpoint)
+    },
+    settings: {
+        get: () => ipcRenderer.invoke("edex:settings-get"),
+        save: settings => ipcRenderer.invoke("edex:settings-save", settings),
+        import: source => ipcRenderer.invoke("edex:settings-import", source),
+        export: target => ipcRenderer.invoke("edex:settings-export", target),
+        validate: settings => ipcRenderer.invoke("edex:settings-validate", settings)
+    },
+    privacy: {
+        setScreenShareMode: enabled => ipcRenderer.invoke("edex:privacy-screen-share", !!enabled),
+        onScreenShareMode: callback => {
+            if (typeof callback !== "function") return () => {};
+            const listener = (event, state) => callback(state);
+            ipcRenderer.on("edex:privacy-screen-share", listener);
+            return () => ipcRenderer.removeListener("edex:privacy-screen-share", listener);
+        }
+    },
+    terminal: {
+        primary: () => context.terminal && context.terminal.primary || null,
+        createSession: options => ipcRenderer.invoke("edex:terminal-create-session", options || {})
     },
     paths: context.paths,
     platform: process.platform,

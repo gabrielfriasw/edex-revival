@@ -170,7 +170,7 @@ window.defaultLauncherRailSettings = () => ({
 window.defaultUpdateSettings = () => ({
     enabled: true,
     checkOnStartup: true,
-    autoDownload: true,
+    autoDownload: false,
     installOnQuit: true
 });
 
@@ -180,6 +180,8 @@ window.defaultAiSettings = () => ({
     defaultProvider: "auto",
     contextBytes: 60000,
     redactSecrets: true,
+    promptRetention: "keep",
+    promptRetentionDays: 7,
     commands: {
         codex: "codex",
         claude: "claude"
@@ -193,7 +195,8 @@ window.defaultSpotifySettings = () => ({
     pollIntervalMs: 5000,
     market: "",
     showAlbumArt: true,
-    showDevices: true
+    showDevices: true,
+    dynamicPalette: "fullscreen"
 });
 
 window.normalizeSpotifySettings = spotify => {
@@ -209,6 +212,7 @@ window.normalizeSpotifySettings = spotify => {
     if (next.market && !/^[A-Z]{2}$/.test(next.market)) next.market = "";
     next.showAlbumArt = next.showAlbumArt !== false;
     next.showDevices = next.showDevices !== false;
+    if (!["off", "fullscreen", "always"].includes(next.dynamicPalette)) next.dynamicPalette = defaults.dynamicPalette;
     return next;
 };
 
@@ -239,8 +243,8 @@ window.defaultPerformanceSettings = () => ({
     maxSystemInfoWorkers: 2,
     systemInfoWorkerIdleMs: 30000,
     systemInfoWorkerScaleDelayMs: 750,
-    pauseHiddenWidgets: false,
-    pauseWhenWindowBlurred: false,
+    pauseHiddenWidgets: true,
+    pauseWhenWindowBlurred: true,
     enableGlobeByDefault: true,
     enableTerminalWebGL: true,
     enableTerminalLigatures: true,
@@ -375,6 +379,8 @@ window.normalizeAiSettings = ai => {
     if (next.defaultProvider === "auto" && next.provider !== "auto") next.defaultProvider = next.provider;
     next.contextBytes = Number(next.contextBytes) || defaults.contextBytes;
     next.redactSecrets = next.redactSecrets !== false;
+    if (!["keep", "deleteOnSend", "deleteAfterDays"].includes(next.promptRetention)) next.promptRetention = defaults.promptRetention;
+    next.promptRetentionDays = Number.isInteger(Number(next.promptRetentionDays)) ? Math.max(1, Math.min(365, Number(next.promptRetentionDays))) : defaults.promptRetentionDays;
     next.commands = Object.assign({}, defaults.commands, source.commands || {});
     next.commands.codex = String(next.commands.codex || "codex");
     next.commands.claude = String(next.commands.claude || "claude");
@@ -388,7 +394,7 @@ window.normalizeUpdateSettings = updates => {
     return {
         enabled: source.enabled !== false,
         checkOnStartup: source.checkOnStartup !== false,
-        autoDownload: source.autoDownload !== false,
+        autoDownload: typeof source.autoDownload === "undefined" ? defaults.autoDownload : source.autoDownload === true,
         installOnQuit: source.installOnQuit !== false
     };
 };
@@ -455,6 +461,49 @@ window.normalizeSshSettings = ssh => {
     return next;
 };
 window.normalizeRevivalSettings();
+
+window.privacyScreenShareMode = false;
+window.isScreenShareMode = () => window.privacyScreenShareMode === true;
+window.applyScreenShareMode = state => {
+    window.privacyScreenShareMode = !!(state && state.enabled);
+    document.body.classList.toggle("privacy-screen-share", window.privacyScreenShareMode);
+    window.renderSensitiveNetworkFields();
+    return window.privacyScreenShareMode;
+};
+window.setScreenShareMode = enabled => {
+    window.privacyScreenShareMode = enabled === true;
+    document.body.classList.toggle("privacy-screen-share", window.privacyScreenShareMode);
+    if (edex.privacy && typeof edex.privacy.setScreenShareMode === "function") {
+        return edex.privacy.setScreenShareMode(window.privacyScreenShareMode).then(window.applyScreenShareMode);
+    }
+    window.renderSensitiveNetworkFields();
+    return Promise.resolve(window.privacyScreenShareMode);
+};
+if (edex.privacy && typeof edex.privacy.onScreenShareMode === "function") {
+    edex.privacy.onScreenShareMode(window.applyScreenShareMode);
+}
+
+window.terminalSessionFromReply = reply => {
+    if (reply && typeof reply === "object") {
+        return {
+            ok: reply.ok !== false && Number.isInteger(Number(reply.port)),
+            error: reply.error || "",
+            host: reply.host || "127.0.0.1",
+            port: Number(reply.port),
+            token: String(reply.token || "")
+        };
+    }
+
+    const message = String(reply || "");
+    if (!message.startsWith("SUCCESS")) {
+        return {ok: false, error: message || "Unable to allocate terminal"};
+    }
+
+    const match = message.match(/SUCCESS:\s*(\d+)/);
+    return match
+        ? {ok: true, host: "127.0.0.1", port: Number(match[1]), token: ""}
+        : {ok: false, error: "Invalid terminal session response"};
+};
 
 window.renderTerminalStartupBanner = targetTerm => {
     if (!targetTerm || !targetTerm.term) return;
@@ -995,21 +1044,19 @@ window.initSecondaryTerminal = () => {
     window.currentTerm = 0;
     ipc.send("ttyspawn", {source: "secondary-display"});
     ipc.once("ttyspawn-reply", (event, reply) => {
-        const message = String(reply || "");
-        if (!message.startsWith("SUCCESS:")) {
-            if (status) status.textContent = message || "Unable to allocate terminal";
+        const session = window.terminalSessionFromReply(reply);
+        if (!session.ok) {
+            if (status) status.textContent = session.error || "Unable to allocate terminal";
             return;
         }
-        const port = Number(message.split(":").pop().trim());
-        if (!Number.isInteger(port)) {
-            if (status) status.textContent = "Invalid terminal port";
-            return;
-        }
+        const port = session.port;
         if (status) status.textContent = `TTY ${port}`;
         window.term[0] = new Terminal({
             role: "client",
             parentId: "secondary_terminal",
-            port
+            port,
+            host: session.host,
+            token: session.token
         });
         window.term[0].onprocesschange = processName => {
             if (status) status.textContent = processName ? `TTY ${port} // ${processName}` : `TTY ${port}`;
@@ -1313,11 +1360,14 @@ async function initUI() {
             <pre id="terminal3"></pre>
             <pre id="terminal4"></pre>
         </div>`;
+    const primarySession = edex.terminal && edex.terminal.primary ? edex.terminal.primary() : null;
     window.term = {
         0: new Terminal({
             role: "client",
             parentId: "terminal0",
-            port: window.settings.port || 3000
+            port: primarySession && primarySession.port || window.settings.port || 3000,
+            host: primarySession && primarySession.host || "127.0.0.1",
+            token: primarySession && primarySession.token || ""
         })
     };
     window.currentTerm = 0;
@@ -1710,6 +1760,7 @@ window.applyWidgetVisibility = () => {
     document.body.classList.toggle("widgets-hide-interface", widgets.showInterface === false);
     document.body.classList.toggle("widgets-hide-geo", widgets.showGeo === false);
     document.body.classList.toggle("widgets-spotify-routed", window.isSpotifyRoutedToSecondary());
+    document.body.classList.toggle("privacy-screen-share", window.isScreenShareMode && window.isScreenShareMode());
     document.body.dataset.layoutPreset = window.settings.layoutPreset || "classic";
     document.body.dataset.globeMode = globeMode;
 
@@ -1739,27 +1790,33 @@ window.isGlobeConnectionMode = () => window.isGlobeLiveMode() && window.normaliz
 
 window.shouldResolvePublicNetworkInfo = () => {
     const widgets = window.normalizeWidgetSettings();
+    if (window.isScreenShareMode && window.isScreenShareMode()) return false;
     return widgets.showIp !== false && widgets.showGeo !== false && window.isGlobeLiveMode();
 };
 
 window.persistWidgetVisibility = () => {
     if (!window.settings.widgets) window.settings.widgets = {};
-    fs.writeFileSync(settingsFile, JSON.stringify(window.settings, "", 4));
+    if (edex.settings && typeof edex.settings.save === "function") {
+        edex.settings.save(window.settings).catch(error => {
+            console.warn("Widget settings save failed", error);
+        });
+    }
 };
 
 window.renderSensitiveNetworkFields = () => {
     const widgets = window.normalizeWidgetSettings();
     const ifaceTarget = document.getElementById("mod_netstat_iname");
     const geoTarget = document.querySelector("i.mod_globe_headerInfo");
+    const screenShare = window.isScreenShareMode && window.isScreenShareMode();
     if (ifaceTarget) {
-        if (widgets.showInterface === false) {
+        if (screenShare || widgets.showInterface === false) {
             ifaceTarget.textContent = "Interface: hidden";
         } else if (window.mods && window.mods.netstat && window.mods.netstat.iface) {
             ifaceTarget.textContent = "Interface: "+window.mods.netstat.iface;
         }
     }
     if (geoTarget) {
-        if (widgets.showGeo === false) {
+        if (screenShare || widgets.showGeo === false) {
             geoTarget.textContent = "HIDDEN";
         } else if (window.mods && window.mods.globe && window.mods.globe.lastgeo && window.mods.globe.lastgeo.latitude) {
             geoTarget.textContent = `${window.mods.globe.lastgeo.latitude}, ${window.mods.globe.lastgeo.longitude}`;
@@ -1970,7 +2027,8 @@ window.resetShellTab = (number, focusFallback) => {
     if (number <= 0 || !window.term) return false;
     const terminal = window.term[number];
     try {
-        if (terminal && terminal.term && !terminal.term._isDisposed) terminal.term.dispose();
+        if (terminal && typeof terminal.dispose === "function") terminal.dispose();
+        else if (terminal && terminal.term && !terminal.term._isDisposed) terminal.term.dispose();
     } catch(e) {}
     delete window.term[number];
     const tab = document.getElementById("shell_tab"+number);
@@ -2028,16 +2086,19 @@ window.focusShellTab = number => {
         document.getElementById("shell_tab"+number).innerHTML = window.shellTabLabel(number, "LOADING...");
         ipc.send("ttyspawn", "true");
         ipc.once("ttyspawn-reply", (e, r) => {
-            if (r.startsWith("ERROR")) {
+            const session = window.terminalSessionFromReply(r);
+            if (!session.ok) {
                 document.getElementById("shell_tab"+number).innerHTML = window.shellTabLabel(number, "ERROR");
-                new Modal({type: "warning", title: "Terminal", message: r});
-            } else if (r.startsWith("SUCCESS")) {
-                let port = Number(r.substr(9));
+                new Modal({type: "warning", title: "Terminal", message: session.error || "Unable to allocate terminal"});
+            } else {
+                let port = session.port;
 
                 window.term[number] = new Terminal({
                     role: "client",
                     parentId: "terminal"+number,
-                    port
+                    port,
+                    host: session.host,
+                    token: session.token
                 });
 
                 window.term[number].onclose = e => {
@@ -2741,6 +2802,16 @@ window.openSettings = async () => {
                             <option>${spotifySettings.showDevices === false}</option>
                         </select></td>
                     </tr>
+                    <tr>
+                        <td>spotify.dynamicPalette</td>
+                        <td>Use the current album art palette to recolor the Spotify widget</td>
+                        <td><select id="settingsEditor-spotify-dynamicPalette">
+                            <option>${spotifySettings.dynamicPalette || "fullscreen"}</option>
+                            <option>fullscreen</option>
+                            <option>always</option>
+                            <option>off</option>
+                        </select></td>
+                    </tr>
                     <tr${aiSettingsHidden}>
                         <td>ai.enabled</td>
                         <td>Enable Error to Fix prompt handoff</td>
@@ -2771,6 +2842,21 @@ window.openSettings = async () => {
                             <option>${aiSettings.redactSecrets !== false}</option>
                             <option>${aiSettings.redactSecrets === false}</option>
                         </select></td>
+                    </tr>
+                    <tr${aiSettingsHidden}>
+                        <td>ai.promptRetention</td>
+                        <td>Prompt file retention after Error to Fix handoff</td>
+                        <td><select id="settingsEditor-ai-promptRetention">
+                            <option>${aiSettings.promptRetention || "keep"}</option>
+                            <option>keep</option>
+                            <option>deleteOnSend</option>
+                            <option>deleteAfterDays</option>
+                        </select></td>
+                    </tr>
+                    <tr${aiSettingsHidden}>
+                        <td>ai.promptRetentionDays</td>
+                        <td>Days to keep prompt files when deleteAfterDays is selected</td>
+                        <td><input type="number" id="settingsEditor-ai-promptRetentionDays" value="${Number(aiSettings.promptRetentionDays) || 7}" min="1" max="365"></td>
                     </tr>
                     <tr${aiSettingsHidden}>
                         <td>ai.commands.codex</td>
@@ -2853,7 +2939,7 @@ window.openSettings = async () => {
                     </tr>
                     <tr>
                         <td>editor.ideMode</td>
-                        <td>Use the CodeMirror IDE core with command palette, completions, folding, and lint gutter</td>
+                        <td>Use the Workbench CodeMirror core with command palette, completions, folding, and lint gutter</td>
                         <td><select id="settingsEditor-editor-ideMode">
                             <option>${editorSettings.ideMode !== false}</option>
                             <option>${editorSettings.ideMode === false}</option>
@@ -3009,6 +3095,7 @@ window.enhanceSettingsEditor = () => {
         </div>
         <input id="settingsEditorSearch" type="search" placeholder="Search settings">
         <button type="button" class="primary" data-settings-action="save">Save</button>
+        <button type="button" data-settings-action="screen-share">Screen Share</button>
         <button type="button" data-settings-action="reset-section">Reset Section</button>
         <details class="settings_editor_more">
             <summary>More</summary>
@@ -3076,6 +3163,12 @@ window.enhanceSettingsEditor = () => {
         if (button.dataset.settingsAction === "preview-theme") window.previewSettingsThemeNow();
         if (button.dataset.settingsAction === "apply-theme") window.applySettingsThemeNow();
         if (button.dataset.settingsAction === "reset-section") window.resetSettingsSection();
+        if (button.dataset.settingsAction === "screen-share") {
+            window.setScreenShareMode(!(window.isScreenShareMode && window.isScreenShareMode())).then(enabled => {
+                const status = document.getElementById("settingsEditorStatus");
+                if (status) status.innerText = enabled ? "Screen-share mode enabled for this session." : "Screen-share mode disabled.";
+            });
+        }
         if (button.dataset.settingsAction === "export-profile") window.exportSettingsProfile();
         if (button.dataset.settingsAction === "import-profile") window.importSettingsProfile();
         if (button.dataset.settingsAction === "open-file") {
@@ -3168,36 +3261,36 @@ window.testSettingsShell = async () => {
 
 window.settingsProfileStamp = () => new Date().toISOString().replace(/[:.]/g, "-");
 
-window.exportSettingsProfile = () => {
+window.exportSettingsProfile = async () => {
     const status = document.getElementById("settingsEditorStatus");
     try {
         const target = path.join(settingsDir, `settings-profile-${window.settingsProfileStamp()}.json`);
-        fs.writeFileSync(target, fs.readFileSync(settingsFile, "utf-8"), "utf-8");
-        edex.clipboard.writeText(target);
-        if (status) status.innerText = `Settings profile exported and path copied: ${target}`;
-        return target;
+        const result = await edex.settings.export(target);
+        if (!result || result.ok !== true) throw new Error(result && result.error || "Export failed");
+        edex.clipboard.writeText(result.path || target);
+        if (status) status.innerText = `Settings profile exported and path copied: ${result.path || target}`;
+        return result.path || target;
     } catch(error) {
         if (status) status.innerText = `Settings export failed: ${error.message}`;
         return false;
     }
 };
 
-window.importSettingsProfile = () => {
+window.importSettingsProfile = async () => {
     const status = document.getElementById("settingsEditorStatus");
     const source = window.prompt("Path to settings profile JSON");
     if (!source) return false;
 
     try {
-        const parsed = JSON.parse(fs.readFileSync(source, "utf-8"));
-        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-            throw new Error("Profile must be a JSON object.");
+        const result = await edex.settings.import(source);
+        if (!result || result.ok !== true) {
+            const errors = result && result.errors && result.errors.length ? result.errors.join(" ") : "Import failed";
+            throw new Error(errors);
         }
-
-        const backup = path.join(settingsDir, `settings-backup-before-import-${window.settingsProfileStamp()}.json`);
-        fs.writeFileSync(backup, fs.readFileSync(settingsFile, "utf-8"), "utf-8");
-        fs.writeFileSync(settingsFile, JSON.stringify(parsed, "", 4), "utf-8");
-        window.settings = parsed;
-        if (status) status.innerText = `Settings profile imported. Backup saved: ${backup}. Reload UI to apply.`;
+        window.settings = result.settings || window.settings;
+        window.normalizeRevivalSettings();
+        const suffix = result.backup ? ` Backup saved: ${result.backup}.` : "";
+        if (status) status.innerText = `Settings profile imported.${suffix} Reload UI to apply.`;
         return true;
     } catch(error) {
         if (status) status.innerText = `Settings import failed: ${error.message}`;
@@ -3245,7 +3338,7 @@ window.settingsEditorDefaults = () => Object.assign({
     "terminal.showStartupBanner": true,
     "updates.enabled": true,
     "updates.checkOnStartup": true,
-    "updates.autoDownload": true,
+    "updates.autoDownload": false,
     "updates.installOnQuit": true,
     "spotify.enabled": false,
     "spotify.clientId": "",
@@ -3254,6 +3347,7 @@ window.settingsEditorDefaults = () => Object.assign({
     "spotify.market": "",
     "spotify.showAlbumArt": true,
     "spotify.showDevices": true,
+    "spotify.dynamicPalette": "fullscreen",
     audio: true,
     audioVolume: 1,
     disableFeedbackAudio: false,
@@ -3270,6 +3364,8 @@ window.settingsEditorDefaults = () => Object.assign({
     "ai.defaultProvider": "auto",
     "ai.contextBytes": 60000,
     "ai.redactSecrets": true,
+    "ai.promptRetention": "keep",
+    "ai.promptRetentionDays": 7,
     "ai.commands.codex": "codex",
     "ai.commands.claude": "claude",
     "devExplorer.enabled": true,
@@ -3355,12 +3451,12 @@ window.previewSettingsThemeNow = () => {
     }
 };
 
-window.applySettingsThemeNow = () => {
+window.applySettingsThemeNow = async () => {
     const select = document.getElementById("settingsEditor-theme");
     if (!select) return false;
-    window.writeSettingsFile();
-    window.themeChanger(select.value);
-    return true;
+    const saved = await window.writeSettingsFile();
+    if (saved) window.themeChanger(select.value);
+    return saved;
 };
 
 window.applyTerminalStyle = () => {
@@ -3455,6 +3551,7 @@ window.validateSettingsEditor = () => {
     integerInRange("settingsEditor-editor-fontSize", "Editor font size", 8, 72);
     integerInRange("settingsEditor-editor-tabSize", "Editor tab size", 1, 16);
     integerInRange("settingsEditor-ai-contextBytes", "AI context bytes", 1024, 1000000);
+    integerInRange("settingsEditor-ai-promptRetentionDays", "AI prompt retention days", 1, 365);
 
     const monitorValue = value("settingsEditor-monitor");
     if (monitorValue) {
@@ -3512,9 +3609,15 @@ window.validateSettingsEditor = () => {
     if (!["auto", "codex", "claude"].includes(value("settingsEditor-ai-defaultProvider"))) {
         errors.push("AI provider is invalid.");
     }
+    if (!["keep", "deleteOnSend", "deleteAfterDays"].includes(value("settingsEditor-ai-promptRetention"))) {
+        errors.push("AI prompt retention mode is invalid.");
+    }
 
     if (window.settingsEditorValue("settingsEditor-ai-enabled") === "true") {
         warnings.push("Error to Fix is enabled; terminal diagnostics may be sent to the selected local CLI provider after redaction.");
+    }
+    if (window.settingsEditorValue("settingsEditor-ai-redactSecrets") === "false") {
+        warnings.push("AI redaction is disabled.");
     }
 
     const spotifyClientId = value("settingsEditor-spotify-clientId");
@@ -3524,6 +3627,9 @@ window.validateSettingsEditor = () => {
     const spotifyMarket = value("settingsEditor-spotify-market");
     if (spotifyMarket && !/^[A-Za-z]{2}$/.test(spotifyMarket)) {
         errors.push("Spotify market must be a two-letter country code or empty.");
+    }
+    if (!["off", "fullscreen", "always"].includes(value("settingsEditor-spotify-dynamicPalette"))) {
+        errors.push("Spotify dynamic palette mode is invalid.");
     }
     if (value("settingsEditor-spotify-enabled") === "true" && !spotifyClientId) {
         warnings.push("Spotify is enabled but no Client ID is configured yet.");
@@ -3536,7 +3642,7 @@ window.validateSettingsEditor = () => {
     };
 };
 
-window.writeSettingsFile = () => {
+window.writeSettingsFile = async () => {
     const validation = window.validateSettingsEditor();
     const status = document.getElementById("settingsEditorStatus");
     if (!validation.valid) {
@@ -3624,7 +3730,8 @@ window.writeSettingsFile = () => {
             pollIntervalMs: Number(document.getElementById("settingsEditor-spotify-pollIntervalMs").value),
             market: document.getElementById("settingsEditor-spotify-market").value.trim().toUpperCase(),
             showAlbumArt: (document.getElementById("settingsEditor-spotify-showAlbumArt").value === "true"),
-            showDevices: (document.getElementById("settingsEditor-spotify-showDevices").value === "true")
+            showDevices: (document.getElementById("settingsEditor-spotify-showDevices").value === "true"),
+            dynamicPalette: document.getElementById("settingsEditor-spotify-dynamicPalette").value
         },
         ai: {
             enabled: (document.getElementById("settingsEditor-ai-enabled").value === "true"),
@@ -3632,6 +3739,8 @@ window.writeSettingsFile = () => {
             defaultProvider: document.getElementById("settingsEditor-ai-defaultProvider").value,
             contextBytes: Number(document.getElementById("settingsEditor-ai-contextBytes").value),
             redactSecrets: (document.getElementById("settingsEditor-ai-redactSecrets").value === "true"),
+            promptRetention: document.getElementById("settingsEditor-ai-promptRetention").value,
+            promptRetentionDays: Number(document.getElementById("settingsEditor-ai-promptRetentionDays").value),
             commands: {
                 codex: document.getElementById("settingsEditor-ai-codex").value,
                 claude: document.getElementById("settingsEditor-ai-claude").value
@@ -3719,7 +3828,23 @@ window.writeSettingsFile = () => {
         window.normalizeRevivalSettings();
     }
 
-    fs.writeFileSync(settingsFile, JSON.stringify(window.settings, "", 4));
+    let saveResult;
+    try {
+        saveResult = await edex.settings.save(window.settings);
+    } catch(error) {
+        if (status) status.innerText = `Settings not saved: ${error.message || error}`;
+        return false;
+    }
+    if (!saveResult || saveResult.ok !== true) {
+        if (status) {
+            const errors = saveResult && saveResult.errors && saveResult.errors.length
+                ? saveResult.errors
+                : ["Settings backend rejected the save."];
+            status.innerHTML = "Settings not saved:<br>"+errors.map(error => "- "+window._escapeHtml(error)).join("<br>");
+        }
+        return false;
+    }
+    window.settings = saveResult.settings || window.settings;
     edex.startup.set(window.settings.launchOnStartup);
     if (edex.dualMonitor && typeof edex.dualMonitor.apply === "function") {
         edex.dualMonitor.apply().then(state => {
@@ -3736,7 +3861,8 @@ window.writeSettingsFile = () => {
     window.renderLauncherRail();
     window.applyWidgetVisibility();
     window.applyTerminalStyle();
-    const suffix = validation.warnings.length ? " Warnings: "+validation.warnings.join(" ") : "";
+    const warnings = validation.warnings.concat(saveResult.warnings || []);
+    const suffix = warnings.length ? " Warnings: "+warnings.join(" ") : "";
     document.getElementById("settingsEditorStatus").innerText = "New values written to settings.json file at "+new Date().toTimeString()+"."+suffix;
     return true;
 };

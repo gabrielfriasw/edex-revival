@@ -1,6 +1,14 @@
 # eDEX Revival Changelog
 
-## Unreleased
+## v1.0.5 - 2026-06-20
+
+- Added optional Spotify dynamic palette theming, with `off`, `fullscreen`, and `always` modes driven locally from the current album art.
+- Hardened terminal transport with loopback binding, per-session tokens, trusted IPC checks, and a regression harness.
+- Moved Settings save/import/export behind main-process IPC with validation, backups, and atomic writes.
+- Added session-only screen-share mode, conservative unsigned-update defaults, AI prompt retention controls, and plugin trust/permission health states.
+- Added plugin cleanup support so plugin-owned intervals can be disposed when windows close, plugins reload, or third-party plugins are disabled.
+- Renamed user-facing IDE surfaces to Workbench to keep the developer cockpit scoped below a full IDE clone.
+- Removed the internal roadmap/checklist document from release docs.
 
 ## v1.0.4 - 2026-06-19
 

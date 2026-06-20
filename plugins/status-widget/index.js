@@ -10,7 +10,7 @@ exports.activate = api => {
                 body.innerHTML = `<div class="devfs_empty">Example status: ${new Date().toLocaleTimeString()}</div>`;
             };
             update();
-            setInterval(update, 1000);
+            return api.setInterval(update, 1000);
         }
     });
 };

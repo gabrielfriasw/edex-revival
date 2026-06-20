@@ -1,5 +1,63 @@
 # eDEX Revival Release Notes
 
+## v1.0.5
+
+Security hardening, Spotify palette, privacy, and plugin trust release.
+
+### Highlights
+
+- Added optional Spotify dynamic palette theming for the normal widget and fullscreen focus mode.
+- `spotify.dynamicPalette` supports `fullscreen`, `always`, and `off`.
+- Album colors are extracted locally from the already-rendered album art; no AI model, remote palette service, or persisted color profile is used.
+- Terminal WebSocket sessions now bind to loopback and require a random per-session token before the renderer can attach.
+- Terminal IPC resize/startup messages now include the session token and trusted-sender checks.
+- Settings save/import/export now run through main-process IPC with validation, backups, and atomic writes.
+- Added session-only screen-share mode for masking sensitive paths, SSH/network labels, interface data, and geolocation while presenting or recording.
+- Plugin Manager now shows trust state, declared permissions, health, and last errors, with a third-party plugin recovery action.
+
+### Fixes And Hardening
+
+- Added a terminal transport regression harness for loopback/token validation.
+- Added explicit terminal cleanup for renderer listeners, DOM listeners, timers, WebSocket clients, WebSocket servers, and pty data subscriptions.
+- Changed new-install performance defaults to pause hidden widgets and pause when the app window is blurred.
+- Blocked public IP/geolocation resolution while screen-share mode is active.
+- Made unsigned update behavior conservative: automatic update downloads stay disabled until signed release enforcement is enabled.
+- Added AI prompt retention controls and removed shell-chained prompt deletion. Prompt cleanup now runs through a narrow backend IPC path.
+- Added plugin-owned interval cleanup support so example plugins do not leave timers running after plugin/window shutdown.
+- Renamed visible IDE labels to Workbench to keep expectations aligned with the lightweight developer cockpit scope.
+- Removed the internal roadmap/checklist document from public release docs.
+
+### Compatibility Notes
+
+- Existing settings are merged forward on boot.
+- Existing users who already enabled automatic update downloads will still see update checks, but downloads are not automatic while release signing enforcement is disabled.
+- Spotify still uses the existing user-owned Spotify Web API setup. No Client Secret is stored or required.
+- SSH passwords are still never stored, and AI controls remain hidden unless `ai.enabled` is explicitly true.
+- Plugins are local trusted code. Install only plugins you trust.
+- LSP, debugger, extension marketplace, and macOS release work remain outside this release cycle.
+- Windows and Linux remain the supported package targets.
+
+### Validation
+
+- `node --check` on touched JavaScript files.
+- `npm run test:terminal-transport`.
+- CSS brace checks on touched stylesheets.
+- `git diff --check`.
+- trailing whitespace scan.
+- `npm test`.
+- Windows package build.
+
+### Download
+
+Use the Windows installer attached to this release. Linux builds use the AppImage target:
+
+```text
+eDEX-Revival-Windows-x64.exe
+eDEX-Revival-Linux-x86_64.AppImage
+```
+
+Auto-update metadata is included as `latest.yml` and installer blockmap assets where generated.
+
 ## v1.0.4
 
 Dual monitor, fullscreen startup, and Settings Center cleanup release.

@@ -57,7 +57,14 @@ function readJsonFile(file, fallback) {
 }
 
 function writeJsonFile(file, data) {
-    fs.writeFileSync(file, JSON.stringify(data, null, 4), "utf-8");
+    writeJsonFileAtomic(file, data);
+}
+
+function writeJsonFileAtomic(file, data) {
+    const dir = path.dirname(file);
+    const tmp = path.join(dir, `.${path.basename(file)}.${process.pid}.${Date.now()}.tmp`);
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 4), "utf-8");
+    fs.renameSync(tmp, file);
 }
 
 function mergeDefaults(target, defaults) {
@@ -85,6 +92,8 @@ function defaultAiSettings() {
         defaultProvider: "auto",
         contextBytes: DEFAULT_CONTEXT_BYTES,
         redactSecrets: true,
+        promptRetention: "keep",
+        promptRetentionDays: 7,
         commands: {
             codex: "codex",
             claude: "claude"
@@ -100,7 +109,8 @@ function defaultSpotifySettings() {
         pollIntervalMs: 5000,
         market: "",
         showAlbumArt: true,
-        showDevices: true
+        showDevices: true,
+        dynamicPalette: "fullscreen"
     };
 }
 
@@ -120,8 +130,8 @@ function defaultDevSettings() {
             maxSystemInfoWorkers: 2,
             systemInfoWorkerIdleMs: 30000,
             systemInfoWorkerScaleDelayMs: 750,
-            pauseHiddenWidgets: false,
-            pauseWhenWindowBlurred: false,
+            pauseHiddenWidgets: true,
+            pauseWhenWindowBlurred: true,
             enableGlobeByDefault: true,
             enableTerminalWebGL: true,
             enableTerminalLigatures: true,
@@ -196,6 +206,17 @@ function normalizeAiProvider(value) {
     return ["auto", "codex", "claude"].includes(provider) ? provider : "auto";
 }
 
+function normalizePromptRetention(value) {
+    const mode = String(value || "keep");
+    return ["keep", "deleteOnSend", "deleteAfterDays"].includes(mode) ? mode : "keep";
+}
+
+function normalizeProviderCommand(value, fallback) {
+    const command = stripControlText(value).trim();
+    if (!command || command.length > 240 || /[\r\n;&|<>`]/.test(command)) return fallback;
+    return command;
+}
+
 function normalizeAiSettings(ai) {
     const next = mergeDefaults(ai && typeof ai === "object" && !Array.isArray(ai) ? ai : {}, defaultAiSettings());
     next.enabled = next.enabled === true;
@@ -204,9 +225,11 @@ function normalizeAiSettings(ai) {
     if (next.defaultProvider === "auto" && next.provider !== "auto") next.defaultProvider = next.provider;
     next.contextBytes = clampInteger(next.contextBytes, 1024, 1000000, DEFAULT_CONTEXT_BYTES);
     next.redactSecrets = next.redactSecrets !== false;
+    next.promptRetention = normalizePromptRetention(next.promptRetention);
+    next.promptRetentionDays = clampInteger(next.promptRetentionDays, 1, 365, 7);
     next.commands = Object.assign({codex: "codex", claude: "claude"}, next.commands || {});
-    next.commands.codex = String(next.commands.codex || "codex").trim() || "codex";
-    next.commands.claude = String(next.commands.claude || "claude").trim() || "claude";
+    next.commands.codex = normalizeProviderCommand(next.commands.codex || "codex", "codex");
+    next.commands.claude = normalizeProviderCommand(next.commands.claude || "claude", "claude");
     delete next.ollama;
     return next;
 }
@@ -223,6 +246,7 @@ function normalizeSpotifySettings(spotify) {
     if (next.market && !/^[A-Z]{2}$/.test(next.market)) next.market = "";
     next.showAlbumArt = next.showAlbumArt !== false;
     next.showDevices = next.showDevices !== false;
+    if (!["off", "fullscreen", "always"].includes(next.dynamicPalette)) next.dynamicPalette = defaults.dynamicPalette;
     return next;
 }
 
@@ -267,6 +291,144 @@ function normalizeSettings(settings) {
     next.spotify = normalizeSpotifySettings(next.spotify);
     next.performance = normalizePerformanceSettings(next.performance);
     return next;
+}
+
+function hasNullByte(value) {
+    return typeof value === "string" && value.includes("\0");
+}
+
+function isProtocolPath(value) {
+    return typeof value === "string" && /^[a-z]+:\/\//i.test(value);
+}
+
+function pushInvalidLocalPath(errors, value, label, allowEmpty = false) {
+    if (allowEmpty && !value) return;
+    if (typeof value !== "string" || !value || hasNullByte(value) || isProtocolPath(value) || value.length >= 4096) {
+        errors.push(`${label} is not a valid local path.`);
+    }
+}
+
+function validateSettings(settings) {
+    const errors = [];
+    const warnings = [];
+    const source = settings && typeof settings === "object" && !Array.isArray(settings) ? settings : null;
+    if (!source) {
+        return {valid: false, errors: ["Settings must be a JSON object."], warnings, settings: normalizeSettings({})};
+    }
+
+    const number = (value, label, min, max) => {
+        const parsed = Number(value);
+        if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
+            errors.push(`${label} must be an integer between ${min} and ${max}.`);
+        }
+    };
+    const enumValue = (value, label, allowed) => {
+        if (!allowed.includes(value)) errors.push(`${label} is invalid.`);
+    };
+    const boolValue = (value, label) => {
+        if (typeof value !== "undefined" && typeof value !== "boolean") errors.push(`${label} must be true or false.`);
+    };
+
+    if (typeof source.shell !== "undefined") {
+        if (typeof source.shell !== "string" || !source.shell.trim() || hasNullByte(source.shell) || isProtocolPath(source.shell)) {
+            errors.push("Shell is invalid.");
+        } else if (path.isAbsolute(source.shell) && !fs.existsSync(source.shell)) {
+            errors.push("Shell path does not exist.");
+        }
+    }
+    if (typeof source.cwd !== "undefined") {
+        pushInvalidLocalPath(errors, source.cwd, "Startup working directory");
+        try {
+            const stat = source.cwd && fs.existsSync(source.cwd) ? fs.lstatSync(source.cwd) : null;
+            if (!stat || !stat.isDirectory()) errors.push("Startup working directory must exist and be a directory.");
+        } catch(e) {
+            errors.push("Startup working directory cannot be accessed.");
+        }
+    }
+    ["theme", "keyboard", "iface", "pingAddr", "shellArgs", "env"].forEach(key => {
+        if (typeof source[key] === "string" && hasNullByte(source[key])) errors.push(`${key} contains invalid control data.`);
+    });
+    if (typeof source.port !== "undefined") number(source.port, "Terminal port", 1, 65535);
+    if (typeof source.termFontSize !== "undefined") number(source.termFontSize, "Terminal font size", 6, 72);
+    if (typeof source.clockHours !== "undefined" && ![12, 24].includes(Number(source.clockHours))) errors.push("Clock format must be 12 or 24.");
+    if (typeof source.layoutPreset !== "undefined") enumValue(source.layoutPreset, "Layout preset", ["classic", "minimal", "developer", "privacy", "cinematic"]);
+
+    const launcherRail = source.launcherRail || {};
+    if (launcherRail && typeof launcherRail === "object" && !Array.isArray(launcherRail)) {
+        if (typeof launcherRail.position !== "undefined") enumValue(launcherRail.position, "Launcher header position", ["top"]);
+        ["enabled", "compact", "labels", "autoHide"].forEach(key => boolValue(launcherRail[key], `launcherRail.${key}`));
+    }
+
+    const performance = source.performance || {};
+    if (performance && typeof performance === "object" && !Array.isArray(performance)) {
+        if (typeof performance.profile !== "undefined") enumValue(performance.profile, "Performance profile", ["balanced", "max", "cinematic"]);
+        if (typeof performance.systemInfoWorkers !== "undefined") number(performance.systemInfoWorkers, "System information workers", 1, 4);
+        if (typeof performance.maxSystemInfoWorkers !== "undefined") number(performance.maxSystemInfoWorkers, "Maximum system information workers", 1, 4);
+        if (Number(performance.maxSystemInfoWorkers) < Number(performance.systemInfoWorkers)) {
+            errors.push("Maximum system information workers must be greater than or equal to baseline workers.");
+        }
+        if (typeof performance.systemInfoWorkerIdleMs !== "undefined") number(performance.systemInfoWorkerIdleMs, "System information worker idle timeout", 5000, 300000);
+        if (typeof performance.systemInfoWorkerScaleDelayMs !== "undefined") number(performance.systemInfoWorkerScaleDelayMs, "System information worker scale delay", 100, 60000);
+        if (typeof performance.enableErrorLens !== "undefined") enumValue(performance.enableErrorLens, "Error Lens mode", ["off", "ai-only", "always"]);
+    }
+
+    const widgets = source.widgets || {};
+    if (widgets && typeof widgets === "object" && !Array.isArray(widgets)) {
+        if (typeof widgets.globeMode !== "undefined") enumValue(widgets.globeMode, "Globe mode", ["full", "reduced", "offline", "hidden"]);
+        ["visible", "showIp", "showInterface", "showGeo"].forEach(key => boolValue(widgets[key], `widgets.${key}`));
+    }
+
+    const updates = source.updates || {};
+    if (updates && typeof updates === "object" && !Array.isArray(updates)) {
+        ["enabled", "checkOnStartup", "autoDownload", "installOnQuit"].forEach(key => boolValue(updates[key], `updates.${key}`));
+    }
+
+    const spotify = source.spotify || {};
+    if (spotify && typeof spotify === "object" && !Array.isArray(spotify)) {
+        if (spotify.clientId && !/^[A-Za-z0-9_-]{8,128}$/.test(String(spotify.clientId))) errors.push("Spotify Client ID contains invalid characters.");
+        if (spotify.market && !/^[A-Za-z]{2}$/.test(String(spotify.market))) errors.push("Spotify market must be a two-letter country code.");
+        if (typeof spotify.callbackPort !== "undefined") number(spotify.callbackPort, "Spotify callback port", 1024, 65535);
+        if (typeof spotify.pollIntervalMs !== "undefined") number(spotify.pollIntervalMs, "Spotify polling interval", 2500, 30000);
+        if (typeof spotify.dynamicPalette !== "undefined") enumValue(spotify.dynamicPalette, "Spotify dynamic palette", ["off", "fullscreen", "always"]);
+    }
+
+    const ai = source.ai || {};
+    if (ai && typeof ai === "object" && !Array.isArray(ai)) {
+        if (typeof ai.provider !== "undefined") enumValue(ai.provider, "AI provider", ["auto", "codex", "claude"]);
+        if (typeof ai.defaultProvider !== "undefined") enumValue(ai.defaultProvider, "AI default provider", ["auto", "codex", "claude"]);
+        if (typeof ai.contextBytes !== "undefined") number(ai.contextBytes, "AI context bytes", 1024, 1000000);
+        if (typeof ai.promptRetention !== "undefined") enumValue(ai.promptRetention, "AI prompt retention", ["keep", "deleteOnSend", "deleteAfterDays"]);
+        if (typeof ai.promptRetentionDays !== "undefined") number(ai.promptRetentionDays, "AI prompt retention days", 1, 365);
+        boolValue(ai.enabled, "ai.enabled");
+        boolValue(ai.redactSecrets, "ai.redactSecrets");
+        if (ai.redactSecrets === false) warnings.push("AI redaction is disabled.");
+        const commands = ai.commands && typeof ai.commands === "object" && !Array.isArray(ai.commands) ? ai.commands : {};
+        ["codex", "claude"].forEach(key => {
+            const command = commands[key];
+            if (typeof command !== "undefined" && normalizeProviderCommand(command, "") !== String(command).trim()) {
+                errors.push(`AI ${key} command contains unsupported shell characters.`);
+            }
+        });
+    }
+
+    const editor = source.editor || {};
+    if (editor && typeof editor === "object" && !Array.isArray(editor)) {
+        if (typeof editor.defaultOpenBehavior !== "undefined") enumValue(editor.defaultOpenBehavior, "Editor default open behavior", ["smart", "editor", "preview", "external", "ask"]);
+    }
+
+    const plugins = source.plugins || {};
+    if (plugins && typeof plugins === "object" && !Array.isArray(plugins)) {
+        if (Array.isArray(plugins.paths)) {
+            plugins.paths.forEach((pluginPath, index) => pushInvalidLocalPath(errors, pluginPath, `Plugin path ${index + 1}`));
+        }
+    }
+
+    return {
+        valid: errors.length === 0,
+        errors,
+        warnings,
+        settings: normalizeSettings(JSON.parse(JSON.stringify(source)))
+    };
 }
 
 async function accessReport(target, type) {
@@ -714,6 +876,9 @@ function pluginSearchPaths(settings, app) {
 async function listPlugins(settings, app) {
     const disabled = new Set(settings.plugins && Array.isArray(settings.plugins.disabled) ? settings.plugins.disabled : []);
     const errors = settings.plugins && settings.plugins.errors && typeof settings.plugins.errors === "object" ? settings.plugins.errors : {};
+    const bundledRoot = path.join(app.getAppPath(), "plugins");
+    const bundledRootKey = bundledRoot.toLowerCase();
+    const userDataKey = app.getPath("userData").toLowerCase();
     const roots = pluginSearchPaths(settings, app);
     const plugins = [];
 
@@ -733,18 +898,28 @@ async function listPlugins(settings, app) {
             const manifest = readJsonFile(manifestFile, null);
             if (!manifest || typeof manifest.id !== "string" || typeof manifest.entry !== "string") continue;
             const entryPath = path.resolve(dir, manifest.entry);
-            if (!entryPath.startsWith(dir + path.sep) && entryPath !== dir) continue;
+            const dirKey = dir.toLowerCase();
+            const entryPathKey = entryPath.toLowerCase();
+            if (!entryPathKey.startsWith(dirKey + path.sep) && entryPathKey !== dirKey) continue;
+            const safeRootKey = safeRoot.toLowerCase();
+            const trustState = safeRootKey === bundledRootKey || safeRootKey.startsWith(bundledRootKey + path.sep)
+                ? "bundled"
+                : (safeRootKey.startsWith(userDataKey + path.sep) ? "local" : "custom");
+            const permissions = Array.isArray(manifest.permissions) ? manifest.permissions.map(item => String(item)) : [];
+            const contributes = manifest.contributes && typeof manifest.contributes === "object" ? manifest.contributes : {};
             plugins.push({
                 id: manifest.id,
                 name: manifest.name || manifest.id,
                 version: manifest.version || "0.0.0",
                 description: manifest.description || "",
-                permissions: Array.isArray(manifest.permissions) ? manifest.permissions : [],
-                contributes: manifest.contributes || {},
+                trustState,
+                permissions,
+                contributes,
                 root: dir,
                 entry: entryPath,
                 enabled: !disabled.has(manifest.id),
-                error: errors[manifest.id] || ""
+                error: errors[manifest.id] || "",
+                health: errors[manifest.id] ? "error" : (!disabled.has(manifest.id) ? "ready" : "disabled")
             });
         }
     }
@@ -1846,6 +2021,7 @@ function spotifySafeSettings(settings) {
         market: spotify.market,
         showAlbumArt: spotify.showAlbumArt,
         showDevices: spotify.showDevices,
+        dynamicPalette: spotify.dynamicPalette,
         scopes: SPOTIFY_SCOPES.slice()
     };
 }
@@ -1919,8 +2095,52 @@ function registerDevBackend({app, ipc, shell, getWindow, settingsFile, isTrusted
         return current;
     }
 
-    function persistSettings(settings) {
-        writeJsonFile(settingsFile, normalizeSettings(settings));
+    function backupSettings(reason) {
+        if (!fs.existsSync(settingsFile)) return "";
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const backup = path.join(path.dirname(settingsFile), `settings-backup-${reason || "save"}-${stamp}.json`);
+        fs.copyFileSync(settingsFile, backup);
+        return backup;
+    }
+
+    function persistSettings(settings, options = {}) {
+        const normalized = normalizeSettings(settings);
+        const backup = options.backup === false ? "" : backupSettings(options.reason || "save");
+        writeJsonFileAtomic(settingsFile, normalized);
+        return {settings: normalized, backup};
+    }
+
+    function saveSettingsPayload(settings, reason = "save") {
+        const validation = validateSettings(settings);
+        if (!validation.valid) {
+            return Object.assign({ok: false}, validation);
+        }
+        const result = persistSettings(validation.settings, {reason});
+        return {
+            ok: true,
+            valid: true,
+            errors: [],
+            warnings: validation.warnings,
+            settings: result.settings,
+            backup: result.backup
+        };
+    }
+
+    function importSettingsPayload(source) {
+        const file = resolveLocalPath(source);
+        const parsed = JSON.parse(fs.readFileSync(file, "utf-8").replace(/^\uFEFF/, ""));
+        const result = saveSettingsPayload(parsed, "import");
+        if (!result.ok) return result;
+        result.source = file;
+        return result;
+    }
+
+    function exportSettingsPayload(target) {
+        const file = resolveLocalPath(target);
+        if (path.extname(file).toLowerCase() !== ".json") throw new Error("Settings export target must be a JSON file.");
+        fs.mkdirSync(path.dirname(file), {recursive: true});
+        writeJsonFileAtomic(file, readSettings());
+        return {ok: true, path: file};
     }
 
     function spotifyCanEncrypt() {
@@ -2173,6 +2393,7 @@ function registerDevBackend({app, ipc, shell, getWindow, settingsFile, isTrusted
         if (typeof options.market === "string") patch.market = options.market;
         if (typeof options.showAlbumArt === "boolean") patch.showAlbumArt = options.showAlbumArt;
         if (typeof options.showDevices === "boolean") patch.showDevices = options.showDevices;
+        if (typeof options.dynamicPalette === "string") patch.dynamicPalette = options.dynamicPalette;
         settings.spotify = normalizeSpotifySettings(Object.assign({}, settings.spotify || {}, patch));
         persistSettings(settings);
         return spotifyStatus(settings);
@@ -2264,6 +2485,23 @@ function registerDevBackend({app, ipc, shell, getWindow, settingsFile, isTrusted
         return true;
     }
 
+    async function disableThirdPartyPlugins() {
+        const settings = readSettings();
+        settings.plugins = settings.plugins || {};
+        settings.plugins.disabled = Array.isArray(settings.plugins.disabled) ? settings.plugins.disabled : [];
+        const disabled = new Set(settings.plugins.disabled);
+        const plugins = await listPlugins(settings, app);
+        const disabledNow = [];
+        plugins.forEach(plugin => {
+            if (plugin.trustState === "bundled") return;
+            disabled.add(plugin.id);
+            disabledNow.push(plugin.id);
+        });
+        settings.plugins.disabled = Array.from(disabled);
+        persistSettings(settings, {reason: "plugins-recovery"});
+        return {ok: true, disabled: disabledNow};
+    }
+
     function trusted(event) {
         return isTrustedSender(event);
     }
@@ -2281,8 +2519,39 @@ function registerDevBackend({app, ipc, shell, getWindow, settingsFile, isTrusted
             preferred,
             providers: {codex, claude},
             contextBytes: Number(ai.contextBytes) || DEFAULT_CONTEXT_BYTES,
-            redactSecrets: ai.redactSecrets !== false
+            redactSecrets: ai.redactSecrets !== false,
+            promptRetention: ai.promptRetention,
+            promptRetentionDays: ai.promptRetentionDays
         };
+    }
+
+    async function cleanupOldPromptFiles(ai) {
+        if (!ai || ai.promptRetention !== "deleteAfterDays") return;
+        const retentionMs = Math.max(1, Number(ai.promptRetentionDays) || 7) * 24 * 60 * 60 * 1000;
+        const cutoff = Date.now() - retentionMs;
+        const entries = await fsp.readdir(promptDir, {withFileTypes: true}).catch(() => []);
+        await Promise.all(entries.map(async entry => {
+            if (!entry.isFile() || !entry.name.endsWith(".txt")) return;
+            const file = path.join(promptDir, entry.name);
+            const stat = await fsp.stat(file).catch(() => null);
+            if (stat && stat.mtimeMs < cutoff) {
+                await fsp.unlink(file).catch(() => {});
+            }
+        }));
+    }
+
+    async function consumePromptFile(file) {
+        const resolved = path.resolve(String(file || ""));
+        const promptRoot = path.resolve(promptDir);
+        const resolvedKey = process.platform === "win32" ? resolved.toLowerCase() : resolved;
+        const promptRootKey = process.platform === "win32" ? promptRoot.toLowerCase() : promptRoot;
+        if (!resolvedKey.startsWith(promptRootKey + path.sep) || path.extname(resolved).toLowerCase() !== ".txt") {
+            throw new Error("Prompt file is outside the AI prompt directory.");
+        }
+        await fsp.unlink(resolved).catch(error => {
+            if (error && error.code !== "ENOENT") throw error;
+        });
+        return {ok: true};
     }
 
     function getStartupStatus() {
@@ -2463,15 +2732,16 @@ function registerDevBackend({app, ipc, shell, getWindow, settingsFile, isTrusted
         if (!trusted(event)) return null;
         const settings = readSettings();
         const tools = await detectTools(settings);
-        const ai = settings.ai || {};
+        const ai = normalizeSettings(settings).ai;
         if (ai.enabled !== true) throw new Error("AI integration is disabled");
         let selected = provider || tools.preferred || "codex";
         if (selected === "auto") selected = tools.preferred;
         if (!["codex", "claude"].includes(selected)) selected = tools.providers.codex.available ? "codex" : "claude";
 
         const providerCommand = ai.commands && ai.commands[selected] || selected;
-        const safePrompt = prepareAiPrompt(normalizeSettings(settings).ai, prompt).prompt;
+        const safePrompt = prepareAiPrompt(ai, prompt).prompt;
         await fsp.mkdir(promptDir, {recursive: true});
+        await cleanupOldPromptFiles(ai);
         const promptFile = path.join(promptDir, `${Date.now()}-${crypto.randomBytes(4).toString("hex")}-${selected}.txt`);
         await fsp.writeFile(promptFile, safePrompt.slice(0, Number(ai.contextBytes) || DEFAULT_CONTEXT_BYTES), "utf-8");
 
@@ -2479,8 +2749,18 @@ function registerDevBackend({app, ipc, shell, getWindow, settingsFile, isTrusted
             provider: selected,
             command: buildPipeCommand(providerCommand, promptFile),
             promptFile,
+            deletePromptOnSend: ai.promptRetention === "deleteOnSend",
             tools
         };
+    });
+
+    ipc.handle("edex:ai-consume-prompt", async (event, promptFile) => {
+        if (!trusted(event)) return {ok: false, error: "Untrusted sender"};
+        try {
+            return await consumePromptFile(promptFile);
+        } catch(error) {
+            return {ok: false, error: error.message || String(error)};
+        }
     });
 
     ipc.handle("edex:git-status", async (event, cwd) => {
@@ -2714,6 +2994,31 @@ function registerDevBackend({app, ipc, shell, getWindow, settingsFile, isTrusted
         return workspaceSearch(cwd, query, options || {});
     });
 
+    ipc.handle("edex:settings-get", event => {
+        if (!trusted(event)) return null;
+        return readSettings();
+    });
+
+    ipc.handle("edex:settings-validate", (event, settings) => {
+        if (!trusted(event)) return {valid: false, errors: ["Untrusted sender"], warnings: []};
+        return validateSettings(settings);
+    });
+
+    ipc.handle("edex:settings-save", (event, settings) => {
+        if (!trusted(event)) return {ok: false, valid: false, errors: ["Untrusted sender"], warnings: []};
+        return saveSettingsPayload(settings, "save");
+    });
+
+    ipc.handle("edex:settings-import", (event, source) => {
+        if (!trusted(event)) return {ok: false, valid: false, errors: ["Untrusted sender"], warnings: []};
+        return importSettingsPayload(source);
+    });
+
+    ipc.handle("edex:settings-export", (event, target) => {
+        if (!trusted(event)) return {ok: false, error: "Untrusted sender"};
+        return exportSettingsPayload(target);
+    });
+
     ipc.handle("edex:plugins-list", async event => {
         if (!trusted(event)) return [];
         return listPlugins(readSettings(), app);
@@ -2722,6 +3027,11 @@ function registerDevBackend({app, ipc, shell, getWindow, settingsFile, isTrusted
     ipc.handle("edex:plugins-set-state", async (event, pluginId, enabled, errorMessage) => {
         if (!trusted(event) || typeof pluginId !== "string" || !pluginId) return false;
         return setPluginState(pluginId, !!enabled, errorMessage || "");
+    });
+
+    ipc.handle("edex:plugins-disable-third-party", async event => {
+        if (!trusted(event)) return {ok: false, disabled: []};
+        return disableThirdPartyPlugins();
     });
 
     ipc.handle("edex:shell-test", async (event, options) => {
@@ -2835,5 +3145,6 @@ module.exports = {
     defaultDevSettings,
     normalizeSettings,
     registerDevBackend,
-    redactSecrets
+    redactSecrets,
+    validateSettings
 };

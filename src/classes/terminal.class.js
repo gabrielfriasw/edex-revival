@@ -139,6 +139,50 @@ function stripOsc7(data) {
     return String(data || "").replace(/\x1b\]7;file:\/\/[^\x07\x1b]+(?:\x07|\x1b\\)/g, "");
 }
 
+function isLoopbackAddress(value) {
+    let address = String(value || "").toLowerCase();
+    if (!address) return false;
+    if (address === "localhost" || address === "::1") return true;
+    if (address.startsWith("::ffff:")) address = address.slice(7);
+    return address === "127.0.0.1" || /^127\./.test(address);
+}
+
+function safeTokenEqual(actual, expected) {
+    actual = String(actual || "");
+    expected = String(expected || "");
+    if (!actual || !expected) return false;
+    try {
+        const crypto = require("crypto");
+        const actualBuffer = Buffer.from(actual, "utf-8");
+        const expectedBuffer = Buffer.from(expected, "utf-8");
+        return actualBuffer.length === expectedBuffer.length
+            && crypto.timingSafeEqual(actualBuffer, expectedBuffer);
+    } catch(e) {
+        return actual === expected;
+    }
+}
+
+function terminalAuthFromRequest(info, expectedToken) {
+    const request = info && info.req;
+    const socket = request && request.socket;
+    const remoteAddress = socket && socket.remoteAddress;
+    if (!isLoopbackAddress(remoteAddress)) {
+        return {ok: false, reason: "non-loopback"};
+    }
+
+    let token = "";
+    try {
+        const parsed = new URL(request.url || "/", "ws://127.0.0.1");
+        token = parsed.searchParams.get("token") || "";
+    } catch(e) {}
+
+    if (!safeTokenEqual(token, expectedToken)) {
+        return {ok: false, reason: "bad-token"};
+    }
+
+    return {ok: true, reason: "ok"};
+}
+
 function shellName(shellPath) {
     return String(shellPath || "").split(/[\\/]/).pop().toLowerCase();
 }
@@ -380,6 +424,8 @@ class Terminal {
             this.Ipc = edex.ipc;
 
             this.port = opts.port || 3000;
+            this.host = opts.host || "127.0.0.1";
+            this.token = typeof opts.token === "string" ? opts.token : "";
             this.cwd = "";
             this.oncwdchange = () => {};
             this.errorLens = createTerminalErrorLens(this);
@@ -403,7 +449,7 @@ class Terminal {
                 while (rows.length < 3) {
                     rows = "0"+rows;
                 }
-                this.Ipc.send("terminal_channel-"+this.port, "Resize", cols, rows);
+                this.Ipc.send("terminal_channel-"+this.port, "Resize", this.token, cols, rows);
             };
 
             // Support for custom color filters on the terminal - see #483
@@ -566,8 +612,8 @@ class Terminal {
             document.querySelectorAll('.xterm-helper-textarea').forEach(textarea => textarea.setAttribute('readonly', 'readonly'))
             this.term.focus();
 
-            this.Ipc.send("terminal_channel-"+this.port, "Renderer startup");
-            this.Ipc.on("terminal_channel-"+this.port, (e, ...args) => {
+            this.Ipc.send("terminal_channel-"+this.port, "Renderer startup", this.token);
+            this._removeIpcListener = this.Ipc.on("terminal_channel-"+this.port, (e, ...args) => {
                 switch(args[0]) {
                     case "New cwd":
                         this.cwd = args[1];
@@ -591,10 +637,11 @@ class Terminal {
                 this.oncwdchange(this.cwd || null);
             };
 
-            let sockHost = opts.host || "127.0.0.1";
+            let sockHost = this.host;
             let sockPort = this.port;
+            let sockToken = this.token ? "?token="+encodeURIComponent(this.token) : "";
 
-            this.socket = new WebSocket("ws://"+sockHost+":"+sockPort);
+            this.socket = new WebSocket("ws://"+sockHost+":"+sockPort+"/"+sockToken);
             this.socket.onopen = () => {
                 let attachAddon = new AttachAddon(this.socket);
                 this.term.loadAddon(attachAddon);
@@ -611,6 +658,12 @@ class Terminal {
 
             this._terminalAnalysisBuffer = "";
             this._terminalAnalysisTimer = null;
+            this._domDisposers = [];
+            const addDomListener = (target, type, listener) => {
+                if (!target || typeof target.addEventListener !== "function") return;
+                target.addEventListener(type, listener);
+                this._domDisposers.push(() => target.removeEventListener(type, listener));
+            };
             this.queueTerminalAnalysis = data => {
                 this._terminalAnalysisBuffer = (this._terminalAnalysisBuffer + String(data || "")).slice(-60000);
                 if (this._terminalAnalysisTimer) return;
@@ -653,14 +706,14 @@ class Terminal {
             });
 
             let parent = document.getElementById(opts.parentId);
-            parent.addEventListener("wheel", e => {
+            addDomListener(parent, "wheel", e => {
                 this.term.scrollLines(Math.round(e.deltaY/10));
             });
             this._lastTouchY = null;
-            parent.addEventListener("touchstart", e => {
+            addDomListener(parent, "touchstart", e => {
                 this._lastTouchY = e.targetTouches[0].screenY;
             });
-            parent.addEventListener("touchmove", e => {
+            addDomListener(parent, "touchmove", e => {
                 if (this._lastTouchY) {
                     let y = e.changedTouches[0].screenY;
                     let deltaY = y - this._lastTouchY;
@@ -668,14 +721,14 @@ class Terminal {
                     this.term.scrollLines(-Math.round(deltaY/10));
                 }
             });
-            parent.addEventListener("touchend", e => {
+            addDomListener(parent, "touchend", e => {
                 this._lastTouch = null;
             });
-            parent.addEventListener("touchcancel", e => {
+            addDomListener(parent, "touchcancel", e => {
                 this._lastTouch = null;
             });
 
-            document.querySelector(".xterm-helper-textarea").addEventListener("keydown", e => {
+            addDomListener(document.querySelector(".xterm-helper-textarea"), "keydown", e => {
                 if (e.key === "F11" && window.settings.allowWindowed) {
                     e.preventDefault();
                     window.toggleFullScreen();
@@ -746,6 +799,32 @@ class Terminal {
                 didCopy: false
             };
 
+            this.dispose = () => {
+                if (this._disposed) return false;
+                this._disposed = true;
+                if (this._terminalAnalysisTimer) {
+                    clearTimeout(this._terminalAnalysisTimer);
+                    this._terminalAnalysisTimer = null;
+                }
+                if (typeof this._removeIpcListener === "function") {
+                    this._removeIpcListener();
+                    this._removeIpcListener = null;
+                }
+                (this._domDisposers || []).forEach(dispose => {
+                    try {
+                        dispose();
+                    } catch(e) {}
+                });
+                this._domDisposers = [];
+                try {
+                    if (this.socket && this.socket.readyState <= 1) this.socket.close(1000, "disposed");
+                } catch(e) {}
+                try {
+                    if (this.term && !this.term._isDisposed) this.term.dispose();
+                } catch(e) {}
+                return true;
+            };
+
         } else if (opts.role === "server") {
 
             this.Pty = require("node-pty");
@@ -755,6 +834,11 @@ class Terminal {
 
             this.renderer = null;
             this.port = opts.port || 3000;
+            this.host = opts.host || "127.0.0.1";
+            this.token = typeof opts.token === "string" && opts.token.length >= 16
+                ? opts.token
+                : require("crypto").randomBytes(32).toString("hex");
+            this.isTrustedSender = typeof opts.isTrustedSender === "function" ? opts.isTrustedSender : () => true;
 
             this._closed = false;
             this.onclosed = () => {};
@@ -762,6 +846,7 @@ class Terminal {
             this.onresize = () => {};
             this.ondisconnected = () => {};
             this._cwdFallbackNotified = false;
+            this._ttyDataDisposables = [];
 
             this._disableCWDtracking = false;
             this._getTtyCWD = tty => {
@@ -883,25 +968,55 @@ class Terminal {
                 }, 80);
             }
 
+            this._disposeServerResources = () => {
+                if (this._serverDisposed) return false;
+                this._serverDisposed = true;
+                if (this._tick) {
+                    clearInterval(this._tick);
+                    this._tick = null;
+                }
+                if (this.Ipc && this._ipcHandler && this._ipcChannel) {
+                    this.Ipc.removeListener(this._ipcChannel, this._ipcHandler);
+                    this._ipcHandler = null;
+                }
+                this._ttyDataDisposables.forEach(disposable => {
+                    if (disposable && typeof disposable.dispose === "function") disposable.dispose();
+                });
+                this._ttyDataDisposables = [];
+                if (this.wss) {
+                    try {
+                        this.wss.clients.forEach(client => client.close(1000, "terminal closed"));
+                    } catch(e) {}
+                    try {
+                        this.wss.close();
+                    } catch(e) {}
+                }
+                return true;
+            };
+
             this.tty.onExit(({exitCode, signal}) => {
                 this._closed = true;
+                this._disposeServerResources();
                 this.onclosed(exitCode, signal);
             });
 
             this.wss = new this.Websocket({
+                host: this.host,
                 port: this.port,
                 clientTracking: true,
                 verifyClient: info => {
                     if (this.wss.clients.size >= 1) {
                         return false;
-                    } else {
-                        return true;
                     }
+                    return terminalAuthFromRequest(info, this.token).ok;
                 }
             });
-            this.Ipc.on("terminal_channel-"+this.port, (e, ...args) => {
+            this._ipcChannel = "terminal_channel-"+this.port;
+            this._ipcHandler = (e, ...args) => {
+                if (!this.isTrustedSender(e)) return;
                 switch(args[0]) {
                     case "Renderer startup":
+                        if (!safeTokenEqual(args[1], this.token)) return;
                         this.renderer = e.sender;
                         if (!this._disableCWDtracking && this.tty._cwd) {
                             this.renderer.send("terminal_channel-"+this.port, "New cwd", this.tty._cwd);
@@ -911,8 +1026,9 @@ class Terminal {
                         }
                         break;
                     case "Resize":
-                        let cols = args[1];
-                        let rows = args[2];
+                        if (!safeTokenEqual(args[1], this.token)) return;
+                        let cols = args[2];
+                        let rows = args[3];
                         try {
                             this.tty.resize(Number(cols), Number(rows));
                         } catch (error) {
@@ -923,16 +1039,11 @@ class Terminal {
                     default:
                         return;
                 }
-            });
+            };
+            this.Ipc.on(this._ipcChannel, this._ipcHandler);
             this.wss.on("connection", ws => {
                 this.onopened(this.tty.pid || this.tty._pid);
-                ws.on("close", (code, reason) => {
-                    this.ondisconnected(code, reason);
-                });
-                ws.on("message", msg => {
-                    this.tty.write(msg.toString());
-                });
-                this.tty.onData(data => {
+                const dataDisposable = this.tty.onData(data => {
                     this._nextTickUpdateTtyCWD = true;
                     this._nextTickUpdateProcess = true;
                     const oscCwd = cwdFromOsc7(data);
@@ -948,11 +1059,29 @@ class Terminal {
                         // Websocket closed
                     }
                 });
+                this._ttyDataDisposables.push(dataDisposable);
+                ws.on("close", (code, reason) => {
+                    if (dataDisposable && typeof dataDisposable.dispose === "function") {
+                        dataDisposable.dispose();
+                    }
+                    this._ttyDataDisposables = this._ttyDataDisposables.filter(disposable => disposable !== dataDisposable);
+                    this.ondisconnected(code, reason);
+                });
+                ws.on("message", msg => {
+                    this.tty.write(msg.toString());
+                });
             });
 
             this.close = () => {
-                this.tty.kill();
+                const wasClosed = this._closed;
                 this._closed = true;
+                this._disposeServerResources();
+                if (!wasClosed) {
+                    try {
+                        this.tty.kill();
+                    } catch(e) {}
+                }
+                return !wasClosed;
             };
         } else {
             throw "Unknown purpose";
@@ -962,6 +1091,9 @@ class Terminal {
 
 if (typeof module !== "undefined") {
     module.exports = {
-    Terminal
+        Terminal,
+        isLoopbackAddress,
+        safeTokenEqual,
+        terminalAuthFromRequest
     };
 }

@@ -1,7 +1,7 @@
 {
   "name": "edex-revival",
   "productName": "eDEX Revival",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "A revived sci-fi terminal, system monitor, and developer cockpit.",
   "keywords": [
     "desktop",
@@ -28,6 +28,7 @@
     "postbuild-linux": "node scripts/clean-prebuild.js",
     "postbuild-windows": "node scripts/clean-prebuild.js",
     "test": "npm audit --package-lock-only && npm audit --package-lock-only --prefix src",
+    "test:terminal-transport": "node scripts/terminal-transport-harness.js",
     "init-file-icons": "git submodule update --init",
     "update-file-icons": "git submodule foreach git pull origin master && node file-icons-generator.js"
   },
