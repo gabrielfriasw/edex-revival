@@ -34,12 +34,32 @@ const ipc = ipcMain;
 const path = require("path");
 const url = require("url");
 const fs = require("fs");
-const packageConfig = require("../package.json");
+const packageConfig = loadPackageConfig();
 const Terminal = require("./classes/terminal.class.js").Terminal;
 const {
     defaultDevSettings,
     registerDevBackend
 } = require("./classes/devBackend.class.js");
+
+function loadPackageConfig() {
+    const candidates = [
+        path.join(__dirname, "..", "package.json"),
+        path.join(__dirname, "package.json")
+    ];
+
+    for (const candidate of candidates) {
+        try {
+            if (fs.existsSync(candidate)) {
+                return JSON.parse(fs.readFileSync(candidate, "utf-8").replace(/^\uFEFF/, ""));
+            }
+        } catch (e) {
+            signale.warn("Unable to read application package metadata; using safe defaults.");
+            return {};
+        }
+    }
+
+    return {};
+}
 
 ipc.on("log", (e, type, content) => {
     if (!isTrustedSender(e) && win) return;

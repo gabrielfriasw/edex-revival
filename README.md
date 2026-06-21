@@ -9,7 +9,7 @@
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-GPL--3.0-blue?style=for-the-badge"></a>
   <img alt="Windows" src="https://img.shields.io/badge/windows-primary-00d4ff?style=for-the-badge">
   <img alt="Linux" src="https://img.shields.io/badge/linux-supported-39ff88?style=for-the-badge">
-  <img alt="Version" src="https://img.shields.io/badge/revival-1.0.5-9cf?style=for-the-badge">
+  <img alt="Version" src="https://img.shields.io/badge/revival-1.0.6-9cf?style=for-the-badge">
 </p>
 
 eDEX Revival is a revived sci-fi terminal, system monitor, file cockpit, lightweight editor, SSH launcher, and local developer cockpit.

@@ -1,5 +1,37 @@
 # eDEX Revival Release Notes
 
+## v1.0.6
+
+Emergency packaged startup fix.
+
+### Fixes
+
+- Fixed packaged Windows/Linux startup failure caused by `_boot.js` requiring `../package.json` after the app is assembled from `prebuild-src`.
+- Added a package metadata fallback so development runs and packaged builds both keep safe update defaults instead of aborting during boot.
+
+### Compatibility Notes
+
+- Existing settings are merged forward on boot.
+- Windows and Linux remain the supported package targets.
+
+### Validation
+
+- `node --check` on touched JavaScript files.
+- `npm test`.
+- `git diff --check`.
+- trailing whitespace scan.
+
+### Download
+
+Use the Windows installer attached to this release. Linux builds use the AppImage target:
+
+```text
+eDEX-Revival-Windows-x64.exe
+eDEX-Revival-Linux-x86_64.AppImage
+```
+
+Auto-update metadata is included as `latest.yml` and installer blockmap assets where generated.
+
 ## v1.0.5
 
 Security hardening, Spotify palette, privacy, and plugin trust release.
